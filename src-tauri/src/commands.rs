@@ -3,11 +3,13 @@ use std::path::Path;
 use tauri::Manager;
 
 use crate::domain::{
-    CreateProjectInput, CreateSkillInput, ImportMarketSkillInput, InstallRecordIdInput,
-    InstallSkillGlobalInput, InstallSkillToProjectInput, MarketplaceFeedInput, ProjectPathInput,
-    ProjectPreviewInput, RemoveProjectCliInput, RepoConnectInput, RepoPreflightInput,
-    RepoPreflightResult, ResourceIdInput, ResourceListFilter, SkillDirectoryInput, SkillFileInput,
-    ThirdPartyRepo, UpdateProjectInput, UpdateSkillInput,
+    CreateProjectInput, CreateSkillInput, CreateSlashCommandInput, ImportMarketSkillInput,
+    InstallRecordIdInput, InstallSkillGlobalInput, InstallSkillToProjectInput,
+    InstallSlashCommandGlobalInput, InstallSlashCommandToProjectInput, MarketplaceFeedInput,
+    ProjectPathInput, ProjectPreviewInput, RemoveProjectCliInput, RepoConnectInput,
+    RepoPreflightInput, RepoPreflightResult, ResourceIdInput, ResourceListFilter,
+    SkillDirectoryInput, SkillFileInput, SlashCommandDirectoryInput, SlashCommandFileInput,
+    ThirdPartyRepo, UpdateProjectInput, UpdateSkillInput, UpdateSlashCommandInput,
 };
 use crate::{git, store};
 
@@ -395,6 +397,126 @@ pub async fn skill_sync_from_source(
     run_blocking_command(move || store::sync_legacy_skill_from_source(&app, &skill_id)).await
 }
 
+#[tauri::command]
+pub fn slash_command_list(
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::domain::SlashCommandDto>, String> {
+    store::list_slash_commands(&app)
+}
+
+#[tauri::command]
+pub fn slash_command_get(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<Option<crate::domain::SlashCommandDto>, String> {
+    store::get_slash_command(&app, &id)
+}
+
+#[tauri::command]
+pub async fn slash_command_create(
+    app: tauri::AppHandle,
+    input: CreateSlashCommandInput,
+) -> Result<crate::domain::CreateSlashCommandResult, String> {
+    run_blocking_command(move || store::create_slash_command(&app, &input)).await
+}
+
+#[tauri::command]
+pub async fn slash_command_update(
+    app: tauri::AppHandle,
+    input: UpdateSlashCommandInput,
+) -> Result<crate::domain::SlashCommandDto, String> {
+    run_blocking_command(move || store::update_slash_command(&app, &input)).await
+}
+
+#[tauri::command]
+pub async fn slash_command_delete(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    run_blocking_command(move || store::delete_slash_command(&app, &id)).await
+}
+
+#[tauri::command]
+pub fn slash_command_search(
+    app: tauri::AppHandle,
+    query: String,
+) -> Result<Vec<crate::domain::SlashCommandDto>, String> {
+    store::search_slash_commands(&app, &query)
+}
+
+#[tauri::command]
+pub fn slash_command_show_in_finder(
+    app: tauri::AppHandle,
+    command_id: String,
+) -> Result<(), String> {
+    let path = store::slash_command_source_dir_by_id(&app, &command_id)?;
+    if !path.exists() {
+        return Err("Slash Command 目录不存在".to_string());
+    }
+    open_in_system_file_manager(&path)
+}
+
+#[tauri::command]
+pub fn open_slash_command_with_typora(
+    app: tauri::AppHandle,
+    command_id: String,
+) -> Result<(), String> {
+    let command_dir = store::slash_command_source_dir_by_id(&app, &command_id)?;
+    let command_md_path = command_dir.join("COMMAND.md");
+    if !command_md_path.exists() {
+        return Err("COMMAND.md 文件不存在".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-a")
+            .arg("Typora")
+            .arg(&command_md_path)
+            .spawn()
+            .map_err(|e| format!("failed to open Typora: {}", e))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("start")
+            .arg("Typora")
+            .arg(&command_md_path)
+            .spawn()
+            .map_err(|e| format!("failed to open Typora: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("typora")
+            .arg(&command_md_path)
+            .spawn()
+            .map_err(|e| format!("failed to open Typora: {}", e))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn slash_command_source_dir_path(
+    app: tauri::AppHandle,
+    command_id: String,
+) -> Result<String, String> {
+    let command_dir = store::slash_command_source_dir_by_id(&app, &command_id)?;
+    if !command_dir.join("COMMAND.md").exists() {
+        return Err("COMMAND.md 文件不存在".to_string());
+    }
+
+    Ok(command_dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn slash_command_sync_from_source(
+    app: tauri::AppHandle,
+    command_id: String,
+) -> Result<crate::domain::SlashCommandDto, String> {
+    run_blocking_command(move || store::sync_slash_command_from_source(&app, &command_id)).await
+}
+
 fn open_in_system_file_manager(target_path: &Path) -> Result<(), String> {
     // Use system `open -R` command which is more stable than showfile crate
     #[cfg(target_os = "macos")]
@@ -485,6 +607,22 @@ pub fn skill_uninstall_from_project(
 }
 
 #[tauri::command]
+pub fn slash_command_install_to_project(
+    app: tauri::AppHandle,
+    input: InstallSlashCommandToProjectInput,
+) -> Result<crate::domain::InstallSlashCommandToProjectResult, String> {
+    store::install_slash_command_to_project(&app, &input)
+}
+
+#[tauri::command]
+pub fn slash_command_uninstall_from_project(
+    app: tauri::AppHandle,
+    input: InstallSlashCommandToProjectInput,
+) -> Result<crate::domain::InstallSlashCommandToProjectResult, String> {
+    store::uninstall_slash_command_from_project(&app, &input)
+}
+
+#[tauri::command]
 pub fn project_remove_cli_folders(
     input: RemoveProjectCliInput,
 ) -> Result<crate::domain::RemoveProjectCliResult, String> {
@@ -507,6 +645,22 @@ pub fn skill_uninstall_global(
     input: InstallSkillGlobalInput,
 ) -> Result<crate::domain::InstallSkillGlobalResult, String> {
     store::uninstall_skill_global(&app, &input)
+}
+
+#[tauri::command]
+pub fn slash_command_install_global(
+    app: tauri::AppHandle,
+    input: InstallSlashCommandGlobalInput,
+) -> Result<crate::domain::InstallSlashCommandGlobalResult, String> {
+    store::install_slash_command_global(&app, &input)
+}
+
+#[tauri::command]
+pub fn slash_command_uninstall_global(
+    app: tauri::AppHandle,
+    input: InstallSlashCommandGlobalInput,
+) -> Result<crate::domain::InstallSlashCommandGlobalResult, String> {
+    store::uninstall_slash_command_global(&app, &input)
 }
 
 // ─── Symlink status commands ───────────────────────────────────────────────────
@@ -555,6 +709,31 @@ pub fn skill_import_from_zip(
 }
 
 #[tauri::command]
+pub fn slash_command_import_from_folder(
+    app: tauri::AppHandle,
+    folder_path: String,
+) -> Result<crate::domain::SlashCommandDto, String> {
+    let path = Path::new(&folder_path);
+    store::import_slash_command_from_folder(&app, path)
+}
+
+#[tauri::command]
+pub async fn slash_command_import_from_dialog(
+    app: tauri::AppHandle,
+) -> Result<Option<crate::domain::SlashCommandDto>, String> {
+    run_blocking_command(move || store::import_slash_command_from_dialog(&app)).await
+}
+
+#[tauri::command]
+pub fn slash_command_import_from_zip(
+    app: tauri::AppHandle,
+    zip_path: String,
+) -> Result<crate::domain::SlashCommandDto, String> {
+    let path = Path::new(&zip_path);
+    store::import_slash_command_from_zip(&app, path)
+}
+
+#[tauri::command]
 pub fn skill_export_to_zip(
     app: tauri::AppHandle,
     skill_id: String,
@@ -562,6 +741,16 @@ pub fn skill_export_to_zip(
 ) -> Result<String, String> {
     let path = Path::new(&output_path);
     store::export_skill_to_zip(&app, &skill_id, path)
+}
+
+#[tauri::command]
+pub fn slash_command_export_to_zip(
+    app: tauri::AppHandle,
+    command_id: String,
+    output_path: String,
+) -> Result<String, String> {
+    let path = Path::new(&output_path);
+    store::export_slash_command_to_zip(&app, &command_id, path)
 }
 
 // ─── Skill directory browsing commands ─────────────────────────────────────────
@@ -582,6 +771,22 @@ pub fn skill_read_file(
     store::read_skill_file(&app, &input)
 }
 
+#[tauri::command]
+pub fn slash_command_list_directory(
+    app: tauri::AppHandle,
+    input: SlashCommandDirectoryInput,
+) -> Result<crate::domain::SlashCommandDirectoryListing, String> {
+    store::list_slash_command_directory(&app, &input)
+}
+
+#[tauri::command]
+pub fn slash_command_read_file(
+    app: tauri::AppHandle,
+    input: SlashCommandFileInput,
+) -> Result<crate::domain::SlashCommandFileContent, String> {
+    store::read_slash_command_file(&app, &input)
+}
+
 // ─── External app skills scanning commands ─────────────────────────────────────
 
 #[tauri::command]
@@ -595,6 +800,19 @@ pub fn scan_external_skills(
 #[tauri::command]
 pub fn read_external_skill_content(path: String) -> Result<String, String> {
     store::read_external_skill_content(&path)
+}
+
+#[tauri::command]
+pub fn scan_external_slash_commands(
+    app: tauri::AppHandle,
+    app_id: String,
+) -> Result<Vec<crate::domain::ExternalSlashCommandDto>, String> {
+    store::scan_external_app_slash_commands(&app, &app_id)
+}
+
+#[tauri::command]
+pub fn read_external_slash_command_content(path: String) -> Result<String, String> {
+    store::read_external_slash_command_content(&path)
 }
 
 // ─── Marketplace commands ─────────────────────────────────────────────────────

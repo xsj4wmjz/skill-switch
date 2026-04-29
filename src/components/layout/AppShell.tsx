@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import type { PageId, LibraryTab } from "../../App";
 import { useSkills } from "../../context/SkillContext";
+import { useSlashCommands } from "../../context/SlashCommandContext";
 import { APP_LIST } from "../../context/AppContext";
 import { useSettings } from "../../context/SettingsContext";
 import { useSource } from "../../context/SourceContext";
@@ -13,6 +14,7 @@ import type { ThirdPartyRepo } from "../../types";
 import {
   Plus, Settings, Zap, Sparkles, Database,
   BookMarked, Globe, X, Loader, Cloud, RefreshCw, Trash2, ExternalLink, ChevronRight,
+  TerminalSquare,
 } from "lucide-react";
 import s from "./AppShell.module.css";
 
@@ -107,6 +109,7 @@ function AddRepoModal({ onClose, onAdd }: {
 
 export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalAppFilter, onNavigate, onNavigateRepo, onNavigateLibraryTab, onNavigateExternalApp, children }: Props) {
   const { skills, externalSkills } = useSkills();
+  const { commands, externalCommands } = useSlashCommands();
   const { settings, updateSettings } = useSettings();
   const { sourceStates, marketState, registryState, refresh } = useSource();
   const toast = useToast();
@@ -251,6 +254,8 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
 
   const selfCreatedCount = skills.length;
   const externalCount = externalSkills.length;
+  const slashCommandCount = commands.length;
+  const externalSlashCommandCount = externalCommands.length;
 
   // Per-app external skill counts for sidebar sub-items
   const externalAppGroups = useMemo(() =>
@@ -312,6 +317,21 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                   <span className={s.backupMeta}>本地创建和导入的 Skills</span>
                 </span>
                 <span className={s.backupRight}>{selfCreatedCount > 0 ? `${selfCreatedCount} 项` : ""}</span>
+              </button>
+
+              <button
+                className={`${s.libraryItem} ${activePage === "my-commands" ? s.libraryItemActive : ""}`}
+                onClick={() => onNavigate("my-commands")}
+              >
+                <TerminalSquare size={12} className={s.libraryItemIcon} />
+                <span className={s.backupNameWrap}>
+                  <span className={s.backupName}>Slash Commands</span>
+                  <span className={s.backupMeta}>管理 .commands 目录中的命令</span>
+                </span>
+                <span className={s.backupRight}>
+                  {slashCommandCount > 0 ? `${slashCommandCount} 项` : ""}
+                  {externalSlashCommandCount > 0 ? ` · 外部 ${externalSlashCommandCount}` : ""}
+                </span>
               </button>
 
               {/* 外部 — collapsible with per-CLI sub-items */}

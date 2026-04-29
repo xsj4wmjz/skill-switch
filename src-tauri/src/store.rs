@@ -9,15 +9,18 @@ use uuid::Uuid;
 use crate::domain::{
     AppSettings, BackupSourceConfig, BackupSourceStatus, BackupSyncResult, CheckSymlinkStatusInput,
     CheckSymlinkStatusResult, CreateLegacySkillResult, CreateProjectInput, CreateSkillInput,
-    InstallRecord, InstallSkillGlobalInput, InstallSkillGlobalResult, InstallSkillToProjectInput,
-    InstallSkillToProjectResult, InstallStatus, InstallTarget, InstallTargetKind, LegacyProjectDto,
-    LegacySkillDto, LocalProjectBinding, LocalState, PreviewDecisionAction, PreviewPlan,
-    PreviewPlanKind, ProjectFileEntry, ProjectFileStatus, ProjectPreviewInput, ProjectProfile,
-    ProjectScanResult, ProjectScanSummary, Provenance, ProvenanceKind, RecoveryEntry,
-    RecoveryScanResult, RemoveProjectCliInput, RemoveProjectCliResult, RepairBrokenSymlinksResult,
-    RepoConfig, RepoLibrary, RepoStatus, Resource, ResourceKind, ResourceListFilter,
-    ResourceOrigin, ResourceScope, SkillMutationResult, SkillSymlinkStatus, SourceStatus,
-    SyncStatus, UpdateItem, UpdateProjectInput, UpdateSkillInput,
+    CreateSlashCommandInput, CreateSlashCommandResult, InstallRecord, InstallSkillGlobalInput,
+    InstallSkillGlobalResult, InstallSkillToProjectInput, InstallSkillToProjectResult,
+    InstallSlashCommandGlobalInput, InstallSlashCommandGlobalResult,
+    InstallSlashCommandToProjectInput, InstallSlashCommandToProjectResult, InstallStatus,
+    InstallTarget, InstallTargetKind, LegacyProjectDto, LegacySkillDto, LocalProjectBinding,
+    LocalState, PreviewDecisionAction, PreviewPlan, PreviewPlanKind, ProjectFileEntry,
+    ProjectFileStatus, ProjectPreviewInput, ProjectProfile, ProjectScanResult, ProjectScanSummary,
+    Provenance, ProvenanceKind, RecoveryEntry, RecoveryScanResult, RemoveProjectCliInput,
+    RemoveProjectCliResult, RepairBrokenSymlinksResult, RepoConfig, RepoLibrary, RepoStatus,
+    Resource, ResourceKind, ResourceListFilter, ResourceOrigin, ResourceScope, SkillMutationResult,
+    SkillSymlinkStatus, SlashCommandDto, SourceStatus, SyncStatus, UpdateItem, UpdateProjectInput,
+    UpdateSkillInput, UpdateSlashCommandInput,
 };
 use crate::git;
 use crate::legacy;
@@ -28,6 +31,7 @@ const LIBRARY_DIR: &str = ".skill-switch";
 const LIBRARY_FILE: &str = "library.json";
 const BACKUP_SOURCE_DIR: &str = "backup-source";
 const SKILL_SOURCES_DIR: &str = "skill-sources";
+const COMMAND_SOURCES_DIR: &str = "command-sources";
 const DEFAULT_LIBRARY_REPO_DIR: &str = "library-repo";
 const STANDARD_SKILL_DIRECTORIES: &[&str] = &["scripts", "references", "assets"];
 
@@ -125,6 +129,30 @@ fn preferred_app_skill_path(base_path: &Path, app_id: &str, slug: &str) -> Resul
 
 fn app_skill_paths(base_path: &Path, app_id: &str, slug: &str) -> Result<Vec<PathBuf>, String> {
     Ok(app_skill_dirs(base_path, app_id)?
+        .into_iter()
+        .map(|dir| dir.join(slug))
+        .collect())
+}
+
+fn app_command_dirs(base_path: &Path, app_id: &str) -> Result<Vec<PathBuf>, String> {
+    Ok(app_cli_dirs(base_path, app_id)?
+        .into_iter()
+        .map(|dir| dir.join("commands"))
+        .collect())
+}
+
+fn preferred_app_command_path(
+    base_path: &Path,
+    app_id: &str,
+    slug: &str,
+) -> Result<PathBuf, String> {
+    Ok(preferred_app_cli_dir(base_path, app_id)?
+        .join("commands")
+        .join(slug))
+}
+
+fn app_command_paths(base_path: &Path, app_id: &str, slug: &str) -> Result<Vec<PathBuf>, String> {
+    Ok(app_command_dirs(base_path, app_id)?
         .into_iter()
         .map(|dir| dir.join(slug))
         .collect())
@@ -507,8 +535,38 @@ pub fn get_legacy_skill(
         .map(|resource| resource_to_legacy_skill(resource, &library)))
 }
 
+pub fn list_slash_commands(app: &tauri::AppHandle) -> Result<Vec<SlashCommandDto>, String> {
+    let repo_root = connected_repo_root(app)?;
+    let library = load_repo_library_for_legacy_skills(app, &repo_root)?;
+    Ok(library
+        .resources
+        .iter()
+        .filter(|resource| resource.kind == ResourceKind::SlashCommand)
+        .map(|resource| resource_to_slash_command(resource, &library))
+        .collect())
+}
+
+pub fn get_slash_command(
+    app: &tauri::AppHandle,
+    id: &str,
+) -> Result<Option<SlashCommandDto>, String> {
+    let repo_root = connected_repo_root(app)?;
+    let library = load_repo_library_for_legacy_skills(app, &repo_root)?;
+    Ok(library
+        .resources
+        .iter()
+        .find(|resource| resource.kind == ResourceKind::SlashCommand && resource.id == id)
+        .map(|resource| resource_to_slash_command(resource, &library)))
+}
+
 fn is_managed_skill_resource(resource: &Resource) -> bool {
     resource.kind == ResourceKind::Skill
+        && resource.scope == ResourceScope::Global
+        && resource.project_id.is_none()
+}
+
+fn is_managed_slash_command_resource(resource: &Resource) -> bool {
+    resource.kind == ResourceKind::SlashCommand
         && resource.scope == ResourceScope::Global
         && resource.project_id.is_none()
 }
@@ -1109,6 +1167,274 @@ pub fn search_legacy_skills(
         .collect())
 }
 
+pub fn create_slash_command(
+    app: &tauri::AppHandle,
+    input: &CreateSlashCommandInput,
+) -> Result<CreateSlashCommandResult, String> {
+    create_slash_command_internal(app, input, true)
+}
+
+fn create_slash_command_internal(
+    app: &tauri::AppHandle,
+    input: &CreateSlashCommandInput,
+    _snapshot_before_write: bool,
+) -> Result<CreateSlashCommandResult, String> {
+    let repo_root = connected_repo_root(app)?;
+    let mut library = load_repo_library_for_legacy_skills(app, &repo_root)?;
+    let now = now_ms();
+    let slug = slugify(&input.name);
+
+    if library
+        .resources
+        .iter()
+        .any(|resource| is_managed_slash_command_resource(resource) && resource.slug == slug)
+    {
+        return Err(format!("已存在同名 Slash Command：{}", slug));
+    }
+
+    let resource = Resource {
+        id: Uuid::new_v4().to_string(),
+        slug,
+        title: input.name.clone(),
+        description: input.description.clone(),
+        kind: ResourceKind::SlashCommand,
+        scope: ResourceScope::Global,
+        origin: ResourceOrigin::Private,
+        source_status: SourceStatus::LocalOnly,
+        project_id: None,
+        tags: input.tags.clone(),
+        content: input.content.clone(),
+        revision: compute_revision(&input.content),
+        source_url: None,
+        source_ref: None,
+        source_path: None,
+        upstream_revision: None,
+        forked_from: None,
+        created_at: now,
+        updated_at: now,
+        provenance: Default::default(),
+    };
+
+    let resource_id = resource.id.clone();
+    library.resources.push(resource.clone());
+    attach_resource_to_profiles(
+        &mut library.project_profiles,
+        &resource_id,
+        &input.project_ids,
+    );
+    save_repo_library(&repo_root, &library)?;
+    ensure_slash_command_source_with_directories(
+        app,
+        &resource.slug,
+        &resource.content,
+        &input.directories,
+    )?;
+
+    let backup_sync =
+        sync_after_mutation(app, &format!("Create slash command: {}", resource.title));
+
+    Ok(CreateSlashCommandResult {
+        command: resource_to_slash_command(&resource, &library),
+        backup_sync,
+    })
+}
+
+pub fn update_slash_command(
+    app: &tauri::AppHandle,
+    input: &UpdateSlashCommandInput,
+) -> Result<SlashCommandDto, String> {
+    let repo_root = connected_repo_root(app)?;
+    let mut library = load_repo_library_for_legacy_skills(app, &repo_root)?;
+    let parsed_front_matter = input.content.as_ref().map(|content| {
+        let (name, description, _) = parse_skill_front_matter(content);
+        (name, description)
+    });
+
+    {
+        let resource = library
+            .resources
+            .iter_mut()
+            .find(|resource| resource.kind == ResourceKind::SlashCommand && resource.id == input.id)
+            .ok_or_else(|| format!("slash command {} not found", input.id))?;
+
+        if let Some(name) = &input.name {
+            resource.title = name.clone();
+        }
+        if let Some(description) = &input.description {
+            resource.description = description.clone();
+        }
+        if let Some(content) = &input.content {
+            resource.content = content.clone();
+            resource.revision = compute_revision(content);
+
+            if input.name.is_none() {
+                if let Some(front_name) = parsed_front_matter
+                    .as_ref()
+                    .and_then(|(name, _)| name.clone())
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+                {
+                    resource.title = front_name;
+                }
+            }
+
+            if input.description.is_none() {
+                if let Some(front_description) = parsed_front_matter
+                    .as_ref()
+                    .and_then(|(_, description)| description.clone())
+                {
+                    let trimmed = front_description.trim().to_string();
+                    resource.description = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    };
+                }
+            }
+        }
+        if let Some(tags) = &input.tags {
+            resource.tags = tags.clone();
+        }
+        resource.updated_at = now_ms();
+    }
+
+    if let Some(project_ids) = &input.project_ids {
+        detach_resource_from_all_profiles(&mut library.project_profiles, &input.id);
+        attach_resource_to_profiles(&mut library.project_profiles, &input.id, project_ids);
+    }
+
+    let resource = library
+        .resources
+        .iter()
+        .find(|resource| resource.kind == ResourceKind::SlashCommand && resource.id == input.id)
+        .ok_or_else(|| format!("slash command {} not found", input.id))?;
+    let result = resource_to_slash_command(resource, &library);
+    save_repo_library(&repo_root, &library)?;
+    ensure_slash_command_source(app, &resource.slug, &resource.content)?;
+
+    let _backup_sync = sync_after_mutation(app, &format!("Update slash command: {}", result.name));
+
+    Ok(result)
+}
+
+pub fn sync_slash_command_from_source(
+    app: &tauri::AppHandle,
+    command_id: &str,
+) -> Result<SlashCommandDto, String> {
+    let repo_root = connected_repo_root(app)?;
+    let mut library = load_repo_library_for_legacy_skills(app, &repo_root)?;
+    let resource_index = library
+        .resources
+        .iter()
+        .position(|resource| {
+            resource.kind == ResourceKind::SlashCommand && resource.id == command_id
+        })
+        .ok_or_else(|| format!("slash command {} not found", command_id))?;
+
+    let command_dir = slash_command_source_dir_by_id(app, command_id)?;
+    let command_file = command_dir.join("COMMAND.md");
+    if !command_file.exists() {
+        return Err("COMMAND.md 文件不存在".to_string());
+    }
+
+    let content =
+        fs::read_to_string(&command_file).map_err(|e| format!("读取 COMMAND.md 失败：{}", e))?;
+    let changed = {
+        let resource = &mut library.resources[resource_index];
+        let (name, description, tags) =
+            derive_skill_source_metadata(&resource.slug, &content, Some(resource.tags.as_slice()));
+        let revision = compute_revision(&content);
+        let changed = resource.title != name
+            || resource.description != description
+            || resource.content != content
+            || resource.tags != tags
+            || resource.revision != revision;
+
+        if changed {
+            resource.title = name;
+            resource.description = description;
+            resource.content = content;
+            resource.tags = tags;
+            resource.revision = revision;
+            resource.updated_at = now_ms();
+        }
+
+        changed
+    };
+
+    if changed {
+        save_repo_library(&repo_root, &library)?;
+        let resource_name = library.resources[resource_index].title.clone();
+        let _backup_sync = sync_after_mutation(
+            app,
+            &format!("Update slash command from source: {}", resource_name),
+        );
+    }
+
+    Ok(resource_to_slash_command(
+        &library.resources[resource_index],
+        &library,
+    ))
+}
+
+pub fn delete_slash_command(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    let repo_root = connected_repo_root(app)?;
+    let mut library = load_repo_library_for_legacy_skills(app, &repo_root)?;
+    let removed_slug = library
+        .resources
+        .iter()
+        .find(|resource| resource.kind == ResourceKind::SlashCommand && resource.id == id)
+        .map(|resource| resource.slug.clone())
+        .ok_or_else(|| format!("slash command {} not found", id))?;
+    let before = library.resources.len();
+    library.resources.retain(|resource| resource.id != id);
+    debug_assert!(before > library.resources.len());
+    detach_resource_from_all_profiles(&mut library.project_profiles, id);
+    save_repo_library(&repo_root, &library)?;
+
+    let source_dir = slash_command_source_dir(app, &removed_slug)?;
+    if source_dir.exists() {
+        remove_path(&source_dir)?;
+    }
+
+    let _backup_sync = sync_after_mutation(app, &format!("Delete slash command: {}", removed_slug));
+
+    Ok(())
+}
+
+pub fn search_slash_commands(
+    app: &tauri::AppHandle,
+    query: &str,
+) -> Result<Vec<SlashCommandDto>, String> {
+    let repo_root = connected_repo_root(app)?;
+    let library = load_repo_library_for_legacy_skills(app, &repo_root)?;
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return list_slash_commands(app);
+    }
+
+    Ok(library
+        .resources
+        .iter()
+        .filter(|resource| resource.kind == ResourceKind::SlashCommand)
+        .filter(|resource| {
+            resource.title.to_lowercase().contains(&needle)
+                || resource
+                    .description
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&needle)
+                || resource.content.to_lowercase().contains(&needle)
+                || resource
+                    .tags
+                    .iter()
+                    .any(|tag| tag.to_lowercase().contains(&needle))
+        })
+        .map(|resource| resource_to_slash_command(resource, &library))
+        .collect())
+}
+
 pub fn list_legacy_projects(app: &tauri::AppHandle) -> Result<Vec<LegacyProjectDto>, String> {
     let repo_root = connected_repo_root(app)?;
     let library = load_repo_library(&repo_root)?;
@@ -1284,6 +1610,10 @@ fn project_target_path(project_root: &Path, resource: &Resource) -> (PathBuf, St
         }
         ResourceKind::Skill => {
             let relative = format!(".codex/skills/{}/SKILL.md", resource.slug);
+            (project_root.join(&relative), relative)
+        }
+        ResourceKind::SlashCommand => {
+            let relative = format!(".codex/commands/{}/COMMAND.md", resource.slug);
             (project_root.join(&relative), relative)
         }
         ResourceKind::Prompt => {
@@ -2085,7 +2415,9 @@ pub fn scan_global_environment(app: &tauri::AppHandle) -> Result<RecoveryScanRes
         .iter()
         .filter(|resource| resource.scope == ResourceScope::Global)
         .filter(|resource| {
-            resource.kind == ResourceKind::Skill || resource.kind == ResourceKind::Prompt
+            resource.kind == ResourceKind::Skill
+                || resource.kind == ResourceKind::SlashCommand
+                || resource.kind == ResourceKind::Prompt
         })
     {
         let path = global_target_path(&codex_home, resource);
@@ -2100,6 +2432,7 @@ pub fn scan_global_environment(app: &tauri::AppHandle) -> Result<RecoveryScanRes
             id: resource.id.clone(),
             kind: match resource.kind {
                 ResourceKind::Skill => "skill",
+                ResourceKind::SlashCommand => "slash-command",
                 ResourceKind::Prompt => "prompt",
                 ResourceKind::Agents => "agents",
             }
@@ -2534,6 +2867,33 @@ fn resource_to_legacy_skill(resource: &Resource, library: &RepoLibrary) -> Legac
     }
 }
 
+fn resource_to_slash_command(resource: &Resource, library: &RepoLibrary) -> SlashCommandDto {
+    let mut project_ids = library
+        .project_profiles
+        .iter()
+        .filter(|profile| profile.attached_resource_ids.contains(&resource.id))
+        .map(|profile| profile.id.clone())
+        .collect::<Vec<_>>();
+    if let Some(project_id) = &resource.project_id {
+        if !project_ids.contains(project_id) {
+            project_ids.push(project_id.clone());
+        }
+    }
+
+    SlashCommandDto {
+        id: resource.id.clone(),
+        slug: resource.slug.clone(),
+        name: resource.title.clone(),
+        description: resource.description.clone(),
+        content: resource.content.clone(),
+        tags: resource.tags.clone(),
+        project_ids,
+        created_at: resource.created_at,
+        updated_at: resource.updated_at,
+        provenance: resource.provenance.clone(),
+    }
+}
+
 fn attach_resource_to_profiles(
     profiles: &mut [ProjectProfile],
     resource_id: &str,
@@ -2609,6 +2969,13 @@ fn target_kind_for_resource(resource: &Resource) -> InstallTargetKind {
     match resource.kind {
         ResourceKind::Agents => InstallTargetKind::ProjectAgents,
         ResourceKind::Prompt => InstallTargetKind::GlobalCodexPrompt,
+        ResourceKind::SlashCommand => {
+            if resource.scope == ResourceScope::Project {
+                InstallTargetKind::ProjectCodexSlashCommand
+            } else {
+                InstallTargetKind::GlobalCodexSlashCommand
+            }
+        }
         ResourceKind::Skill => {
             if resource.scope == ResourceScope::Project {
                 InstallTargetKind::ProjectCodexSkill
@@ -2713,6 +3080,10 @@ fn global_target_path(codex_home: &Path, resource: &Resource) -> PathBuf {
             .join("skills")
             .join(&resource.slug)
             .join("SKILL.md"),
+        ResourceKind::SlashCommand => codex_home
+            .join("commands")
+            .join(&resource.slug)
+            .join("COMMAND.md"),
         ResourceKind::Prompt => codex_home
             .join("prompts")
             .join(format!("{}.md", resource.slug)),
@@ -2744,6 +3115,17 @@ fn discover_local_codex_files(codex_home: &Path) -> Result<Vec<PathBuf>, String>
         }
     }
 
+    let commands_root = codex_home.join("commands");
+    if commands_root.exists() {
+        for entry in fs::read_dir(&commands_root).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file = entry.path().join("COMMAND.md");
+            if file.exists() {
+                items.push(file);
+            }
+        }
+    }
+
     Ok(items)
 }
 
@@ -2756,6 +3138,7 @@ fn remember_recent_project(recent_project_ids: &mut Vec<String>, project_id: &st
 fn default_source_path_for_resource(resource: &Resource) -> String {
     match resource.kind {
         ResourceKind::Skill => "SKILL.md".into(),
+        ResourceKind::SlashCommand => "COMMAND.md".into(),
         ResourceKind::Prompt => format!("{}.md", resource.slug),
         ResourceKind::Agents => "AGENTS.md".into(),
     }
@@ -3064,6 +3447,81 @@ pub fn uninstall_skill_from_project(
     })
 }
 
+pub fn install_slash_command_to_project(
+    app: &tauri::AppHandle,
+    input: &InstallSlashCommandToProjectInput,
+) -> Result<InstallSlashCommandToProjectResult, String> {
+    let command = get_slash_command(app, &input.command_id)?
+        .ok_or_else(|| format!("slash command {} not found", input.command_id))?;
+
+    let project_path = normalize_user_path(&input.project_path)?;
+    if !project_path.exists() {
+        return Err(format!(
+            "project path does not exist: {}",
+            input.project_path
+        ));
+    }
+
+    let source_dir = ensure_slash_command_source_for_command(app, &command)?;
+    let mut installed_apps = Vec::new();
+    let mut failed_apps = Vec::new();
+
+    for app_id in &input.apps {
+        let result = preferred_app_command_path(&project_path, app_id, &command.slug)
+            .and_then(|link_path| create_skill_symlink(&link_path, &source_dir));
+
+        if result.is_ok() {
+            installed_apps.push(app_id.clone());
+        } else {
+            failed_apps.push(app_id.clone());
+        }
+    }
+
+    Ok(InstallSlashCommandToProjectResult {
+        installed_apps,
+        failed_apps,
+    })
+}
+
+pub fn uninstall_slash_command_from_project(
+    app: &tauri::AppHandle,
+    input: &InstallSlashCommandToProjectInput,
+) -> Result<InstallSlashCommandToProjectResult, String> {
+    let command = get_slash_command(app, &input.command_id)?
+        .ok_or_else(|| format!("slash command {} not found", input.command_id))?;
+
+    let project_path = normalize_user_path(&input.project_path)?;
+    if !project_path.exists() {
+        return Err(format!(
+            "project path does not exist: {}",
+            input.project_path
+        ));
+    }
+
+    let mut uninstalled_apps = Vec::new();
+    let mut failed_apps = Vec::new();
+
+    for app_id in &input.apps {
+        let result = app_command_paths(&project_path, app_id, &command.slug).and_then(|paths| {
+            for path in paths {
+                remove_symlink(&path)?;
+            }
+            Ok(())
+        });
+
+        if result.is_ok() {
+            uninstalled_apps.push(app_id.clone());
+        } else {
+            failed_apps.push(app_id.clone());
+        }
+    }
+
+    Ok(InstallSlashCommandToProjectResult {
+        installed_apps: uninstalled_apps,
+        failed_apps,
+    })
+}
+
 // =============================================================================
 // Symlink Utilities
 // =============================================================================
@@ -3306,6 +3764,86 @@ fn ensure_skill_source_in_root(
     }
 
     Ok(source_dir)
+}
+
+fn slash_command_sources_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Some(clone_dir) = persistent_clone_dir(app)? {
+        if clone_dir.exists() {
+            return Ok(clone_dir.join(COMMAND_SOURCES_DIR));
+        }
+    }
+    app.path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())
+        .map(|path| path.join(COMMAND_SOURCES_DIR))
+}
+
+fn slash_command_source_dir(app: &tauri::AppHandle, slug: &str) -> Result<PathBuf, String> {
+    slash_command_sources_dir(app).map(|dir| dir.join(slug))
+}
+
+pub fn slash_command_source_dir_by_id(
+    app: &tauri::AppHandle,
+    command_id: &str,
+) -> Result<PathBuf, String> {
+    let repo_root = connected_repo_root(app)?;
+    let library = load_repo_library(&repo_root)?;
+    let resource = library
+        .resources
+        .iter()
+        .find(|resource| resource.id == command_id && resource.kind == ResourceKind::SlashCommand)
+        .ok_or_else(|| format!("slash command {} not found", command_id))?;
+
+    slash_command_source_dir(app, &resource.slug)
+}
+
+fn ensure_slash_command_source(
+    app: &tauri::AppHandle,
+    slug: &str,
+    content: &str,
+) -> Result<PathBuf, String> {
+    ensure_slash_command_source_with_directories(app, slug, content, &[])
+}
+
+fn ensure_slash_command_source_with_directories(
+    app: &tauri::AppHandle,
+    slug: &str,
+    content: &str,
+    directories: &[String],
+) -> Result<PathBuf, String> {
+    let sources_root = slash_command_sources_dir(app)?;
+    let directories = validate_standard_skill_directories(directories)?;
+    let source_dir = sources_root.join(slug);
+    let command_file = source_dir.join("COMMAND.md");
+
+    fs::create_dir_all(&source_dir)
+        .map_err(|e| format!("Failed to create slash command source directory: {}", e))?;
+
+    let should_write = if command_file.exists() {
+        let existing = fs::read_to_string(&command_file).unwrap_or_default();
+        existing != content
+    } else {
+        true
+    };
+
+    if should_write {
+        fs::write(&command_file, content)
+            .map_err(|e| format!("Failed to write slash command source file: {}", e))?;
+    }
+
+    for directory in directories {
+        fs::create_dir_all(source_dir.join(directory))
+            .map_err(|e| format!("Failed to create slash command source directory: {}", e))?;
+    }
+
+    Ok(source_dir)
+}
+
+fn ensure_slash_command_source_for_command(
+    app: &tauri::AppHandle,
+    command: &SlashCommandDto,
+) -> Result<PathBuf, String> {
+    ensure_slash_command_source(app, &command.slug, &command.content)
 }
 
 fn write_directory_to_zip(
@@ -3608,6 +4146,69 @@ pub fn uninstall_skill_global(
     })
 }
 
+pub fn install_slash_command_global(
+    app: &tauri::AppHandle,
+    input: &InstallSlashCommandGlobalInput,
+) -> Result<InstallSlashCommandGlobalResult, String> {
+    let command = get_slash_command(app, &input.command_id)?
+        .ok_or_else(|| format!("slash command {} not found", input.command_id))?;
+
+    let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
+    let source_dir = ensure_slash_command_source_for_command(app, &command)?;
+
+    let mut installed_apps = Vec::new();
+    let mut failed_apps = Vec::new();
+
+    for app_id in &input.apps {
+        let result = preferred_app_command_path(&home_dir, app_id, &command.slug)
+            .and_then(|link_path| create_skill_symlink(&link_path, &source_dir));
+
+        if result.is_ok() {
+            installed_apps.push(app_id.clone());
+        } else {
+            failed_apps.push(app_id.clone());
+        }
+    }
+
+    Ok(InstallSlashCommandGlobalResult {
+        installed_apps,
+        failed_apps,
+    })
+}
+
+pub fn uninstall_slash_command_global(
+    app: &tauri::AppHandle,
+    input: &InstallSlashCommandGlobalInput,
+) -> Result<InstallSlashCommandGlobalResult, String> {
+    let command = get_slash_command(app, &input.command_id)?
+        .ok_or_else(|| format!("slash command {} not found", input.command_id))?;
+
+    let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
+
+    let mut uninstalled_apps = Vec::new();
+    let mut failed_apps = Vec::new();
+
+    for app_id in &input.apps {
+        let result = app_command_paths(&home_dir, app_id, &command.slug).and_then(|paths| {
+            for path in paths {
+                remove_symlink(&path)?;
+            }
+            Ok(())
+        });
+
+        if result.is_ok() {
+            uninstalled_apps.push(app_id.clone());
+        } else {
+            failed_apps.push(app_id.clone());
+        }
+    }
+
+    Ok(InstallSlashCommandGlobalResult {
+        installed_apps: uninstalled_apps,
+        failed_apps,
+    })
+}
+
 // ─── Import skill functions ────────────────────────────────────────────────────
 
 /// Recursively copy a directory and all its contents
@@ -3711,6 +4312,149 @@ pub fn import_skill_from_dialog(app: &tauri::AppHandle) -> Result<Option<LegacyS
     };
 
     import_skill_from_path(app, &path).map(Some)
+}
+
+fn pick_slash_command_import_path(app: &tauri::AppHandle) -> Result<Option<PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    if let Some(folder) = app
+        .dialog()
+        .file()
+        .set_title("选择 Slash Command 文件夹")
+        .blocking_pick_folder()
+    {
+        return folder
+            .into_path()
+            .map(Some)
+            .map_err(|error| format!("读取目录路径失败：{}", error));
+    }
+
+    if let Some(file) = app
+        .dialog()
+        .file()
+        .add_filter("Slash Command Import", &["zip", "md"])
+        .set_title("选择 COMMAND.md 或 ZIP 包")
+        .blocking_pick_file()
+    {
+        return file
+            .into_path()
+            .map(Some)
+            .map_err(|error| format!("读取文件路径失败：{}", error));
+    }
+
+    Ok(None)
+}
+
+pub fn import_slash_command_from_path(
+    app: &tauri::AppHandle,
+    selected_path: &Path,
+) -> Result<SlashCommandDto, String> {
+    if !selected_path.exists() {
+        return Err("选择的路径不存在".to_string());
+    }
+
+    if selected_path.is_dir() {
+        return import_slash_command_from_folder(app, selected_path);
+    }
+
+    if !selected_path.is_file() {
+        return Err("选择的内容既不是文件夹也不是文件".to_string());
+    }
+
+    let file_name = selected_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+
+    if file_name.eq_ignore_ascii_case("COMMAND.md") {
+        let parent = selected_path
+            .parent()
+            .ok_or_else(|| "无法识别 COMMAND.md 所在目录".to_string())?;
+        return import_slash_command_from_folder(app, parent);
+    }
+
+    let extension = selected_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+
+    if extension.eq_ignore_ascii_case("zip") {
+        return import_slash_command_from_zip(app, selected_path);
+    }
+
+    Err("请选择包含 COMMAND.md 的文件夹、COMMAND.md 文件或 ZIP 包".to_string())
+}
+
+pub fn import_slash_command_from_dialog(
+    app: &tauri::AppHandle,
+) -> Result<Option<SlashCommandDto>, String> {
+    let Some(path) = pick_slash_command_import_path(app)? else {
+        return Ok(None);
+    };
+
+    import_slash_command_from_path(app, &path).map(Some)
+}
+
+pub fn import_slash_command_from_folder(
+    app: &tauri::AppHandle,
+    folder_path: &Path,
+) -> Result<SlashCommandDto, String> {
+    if !folder_path.exists() || !folder_path.is_dir() {
+        return Err("路径不存在或不是文件夹".to_string());
+    }
+
+    let command_md_path = folder_path.join("COMMAND.md");
+    if !command_md_path.exists() {
+        return Err("文件夹中未找到 COMMAND.md 文件，不符合 Slash Command 规范".to_string());
+    }
+
+    let content =
+        fs::read_to_string(&command_md_path).map_err(|e| format!("读取 COMMAND.md 失败：{}", e))?;
+    let (name, description) = parse_skill_metadata(&content);
+
+    if name.is_empty() {
+        return Err("COMMAND.md 中未找到有效的命令名称".to_string());
+    }
+
+    let slug = slugify(&name);
+    let target_dir = slash_command_source_dir(app, &slug)?;
+    if target_dir.exists() {
+        fs::remove_dir_all(&target_dir).map_err(|e| format!("清理旧目录失败：{}", e))?;
+    }
+    copy_dir_all(folder_path, &target_dir)?;
+
+    let input = CreateSlashCommandInput {
+        name,
+        description,
+        content,
+        directories: vec![],
+        tags: vec!["imported".to_string()],
+        project_ids: vec![],
+    };
+
+    let result = create_slash_command_internal(app, &input, false)?;
+    let repo_root = connected_repo_root(app)?;
+    let mut library = load_repo_library(&repo_root)?;
+    if let Some(resource) = library
+        .resources
+        .iter_mut()
+        .find(|resource| resource.id == result.command.id)
+    {
+        resource.provenance = Provenance {
+            kind: ProvenanceKind::FileImport,
+            label: "导入".to_string(),
+            ..Default::default()
+        };
+    }
+    save_repo_library(&repo_root, &library)?;
+    Ok(SlashCommandDto {
+        provenance: Provenance {
+            kind: ProvenanceKind::FileImport,
+            label: "导入".into(),
+            ..Default::default()
+        },
+        ..result.command
+    })
 }
 
 /// Import a skill from a folder containing SKILL.md
@@ -3932,6 +4676,131 @@ pub fn import_skill_from_zip(
     })
 }
 
+pub fn import_slash_command_from_zip(
+    app: &tauri::AppHandle,
+    zip_path: &Path,
+) -> Result<SlashCommandDto, String> {
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    if !zip_path.exists() {
+        return Err("ZIP 文件不存在".to_string());
+    }
+
+    let file = fs::File::open(zip_path).map_err(|e| format!("打开 ZIP 文件失败：{}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("解析 ZIP 文件失败：{}", e))?;
+
+    let mut command_md_content: Option<String> = None;
+    let mut root_prefix: Option<String> = None;
+
+    for i in 0..archive.len() {
+        let mut zip_file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败：{}", e))?;
+        let name = zip_file.name().to_string();
+
+        if name.ends_with("COMMAND.md") {
+            if let Some(pos) = name.rfind("COMMAND.md") {
+                root_prefix = if pos == 0 {
+                    None
+                } else {
+                    Some(name[..pos].to_string())
+                };
+            }
+
+            let mut content = String::new();
+            zip_file
+                .read_to_string(&mut content)
+                .map_err(|e| format!("读取 COMMAND.md 内容失败：{}", e))?;
+            command_md_content = Some(content);
+        }
+    }
+
+    let content = command_md_content
+        .ok_or_else(|| "ZIP 包中未找到 COMMAND.md 文件，不符合 Slash Command 规范".to_string())?;
+
+    let (name, description) = parse_skill_metadata(&content);
+
+    if name.is_empty() {
+        return Err("COMMAND.md 中未找到有效的命令名称".to_string());
+    }
+
+    let slug = slugify(&name);
+    let target_dir = slash_command_source_dir(app, &slug)?;
+    if target_dir.exists() {
+        fs::remove_dir_all(&target_dir).map_err(|e| format!("清理旧目录失败：{}", e))?;
+    }
+    fs::create_dir_all(&target_dir).map_err(|e| format!("创建目录失败：{}", e))?;
+
+    for i in 0..archive.len() {
+        let mut zip_file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败：{}", e))?;
+        let name = zip_file.name().to_string();
+
+        let relative_path = if let Some(ref prefix) = root_prefix {
+            if name.starts_with(prefix) {
+                &name[prefix.len()..]
+            } else {
+                &name
+            }
+        } else {
+            &name
+        };
+
+        if relative_path.is_empty() || relative_path == "/" {
+            continue;
+        }
+
+        let target_path = target_dir.join(relative_path);
+
+        if name.ends_with('/') {
+            fs::create_dir_all(&target_path).map_err(|e| format!("创建目录失败：{}", e))?;
+        } else {
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{}", e))?;
+            }
+            let mut outfile =
+                fs::File::create(&target_path).map_err(|e| format!("创建文件失败：{}", e))?;
+            std::io::copy(&mut zip_file, &mut outfile)
+                .map_err(|e| format!("写入文件失败：{}", e))?;
+        }
+    }
+
+    let input = CreateSlashCommandInput {
+        name,
+        description,
+        content,
+        directories: vec![],
+        tags: vec!["imported".to_string()],
+        project_ids: vec![],
+    };
+
+    let result = create_slash_command_internal(app, &input, false)?;
+    let repo_root = connected_repo_root(app)?;
+    let mut library = load_repo_library(&repo_root)?;
+    if let Some(resource) = library
+        .resources
+        .iter_mut()
+        .find(|resource| resource.id == result.command.id)
+    {
+        resource.provenance = Provenance {
+            kind: ProvenanceKind::FileImport,
+            label: "导入".to_string(),
+            ..Default::default()
+        };
+    }
+    save_repo_library(&repo_root, &library)?;
+    Ok(SlashCommandDto {
+        provenance: Provenance {
+            kind: ProvenanceKind::FileImport,
+            label: "导入".into(),
+            ..Default::default()
+        },
+        ..result.command
+    })
+}
+
 /// Import a skill from a third-party repo source
 pub fn import_skill_from_repo_source(
     app: &tauri::AppHandle,
@@ -4137,6 +5006,34 @@ pub fn export_skill_to_zip(
     Ok(output_path.to_string_lossy().to_string())
 }
 
+pub fn export_slash_command_to_zip(
+    app: &tauri::AppHandle,
+    command_id: &str,
+    output_path: &Path,
+) -> Result<String, String> {
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    let command = get_slash_command(app, command_id)?
+        .ok_or_else(|| format!("slash command {} not found", command_id))?;
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{}", e))?;
+    }
+
+    let file = fs::File::create(output_path).map_err(|e| format!("创建 ZIP 文件失败：{}", e))?;
+
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    let source_dir = ensure_slash_command_source_for_command(app, &command)?;
+    write_directory_to_zip(&mut zip, &source_dir, &source_dir, options)?;
+
+    zip.finish().map_err(|e| format!("完成 ZIP 失败：{}", e))?;
+
+    Ok(output_path.to_string_lossy().to_string())
+}
+
 // =============================================================================
 // Skill Directory Browsing
 // =============================================================================
@@ -4302,6 +5199,150 @@ pub fn read_skill_file(
     })
 }
 
+pub fn list_slash_command_directory(
+    app: &tauri::AppHandle,
+    input: &crate::domain::SlashCommandDirectoryInput,
+) -> Result<crate::domain::SlashCommandDirectoryListing, String> {
+    use crate::domain::{SkillDirectoryEntry, SkillEntryKind, SlashCommandDirectoryListing};
+
+    let command = get_slash_command(app, &input.command_id)?
+        .ok_or_else(|| format!("slash command {} not found", input.command_id))?;
+
+    let source_dir = ensure_slash_command_source_for_command(app, &command)?;
+
+    let target_dir = if let Some(sub_path) = &input.sub_path {
+        let sanitized = sub_path
+            .trim_start_matches('/')
+            .trim_start_matches('\\')
+            .replace("..", "");
+        let full_path = source_dir.join(&sanitized);
+
+        if !full_path.exists() || !full_path.is_dir() {
+            return Err(format!("目录不存在或不是文件夹: {}", sub_path));
+        }
+
+        full_path
+    } else {
+        source_dir.clone()
+    };
+
+    let current_path = input.sub_path.clone().unwrap_or_default();
+    let parent_path = if current_path.is_empty() {
+        None
+    } else {
+        let parts: Vec<&str> = current_path.rsplitn(2, '/').collect();
+        if parts.len() > 1 {
+            Some(parts[1].to_string())
+        } else {
+            Some(String::new())
+        }
+    };
+
+    let mut entries: Vec<SkillDirectoryEntry> = Vec::new();
+
+    if target_dir.exists() && target_dir.is_dir() {
+        for entry in fs::read_dir(&target_dir).map_err(|e| format!("读取目录失败：{}", e))? {
+            let entry = entry.map_err(|e| format!("读取目录条目失败：{}", e))?;
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("?")
+                .to_string();
+
+            if name.starts_with('.') {
+                continue;
+            }
+
+            let metadata = entry.metadata().ok();
+            let is_dir = path.is_dir();
+            let kind = if is_dir {
+                SkillEntryKind::Directory
+            } else {
+                SkillEntryKind::File
+            };
+
+            let entry_path = if current_path.is_empty() {
+                name.clone()
+            } else {
+                format!("{}/{}", current_path, name)
+            };
+
+            let extension = if is_dir {
+                None
+            } else {
+                path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(|extension| extension.to_lowercase())
+            };
+
+            entries.push(SkillDirectoryEntry {
+                name,
+                kind,
+                path: entry_path,
+                extension,
+                size: metadata.as_ref().map(|metadata| metadata.len()),
+            });
+        }
+
+        entries.sort_by(|left, right| match (&left.kind, &right.kind) {
+            (SkillEntryKind::Directory, SkillEntryKind::File) => std::cmp::Ordering::Less,
+            (SkillEntryKind::File, SkillEntryKind::Directory) => std::cmp::Ordering::Greater,
+            _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+        });
+    }
+
+    Ok(SlashCommandDirectoryListing {
+        command_id: input.command_id.clone(),
+        command_slug: command.slug,
+        root_path: source_dir.to_string_lossy().to_string(),
+        current_path,
+        parent_path,
+        entries,
+    })
+}
+
+pub fn read_slash_command_file(
+    app: &tauri::AppHandle,
+    input: &crate::domain::SlashCommandFileInput,
+) -> Result<crate::domain::SlashCommandFileContent, String> {
+    let command = get_slash_command(app, &input.command_id)?
+        .ok_or_else(|| format!("slash command {} not found", input.command_id))?;
+
+    let source_dir = ensure_slash_command_source_for_command(app, &command)?;
+    let sanitized = input
+        .file_path
+        .trim_start_matches('/')
+        .trim_start_matches('\\')
+        .replace("..", "");
+
+    let file_path = source_dir.join(&sanitized);
+
+    if !file_path.exists() {
+        return Err(format!("文件不存在: {}", input.file_path));
+    }
+
+    if !file_path.is_file() {
+        return Err(format!("路径不是文件: {}", input.file_path));
+    }
+
+    let metadata = fs::metadata(&file_path).map_err(|e| format!("读取文件信息失败：{}", e))?;
+    let size = metadata.len();
+
+    if size > 1024 * 1024 {
+        return Err("文件太大，超过 1MB 限制".to_string());
+    }
+
+    let content = fs::read_to_string(&file_path).map_err(|e| format!("读取文件失败：{}", e))?;
+
+    Ok(crate::domain::SlashCommandFileContent {
+        command_id: input.command_id.clone(),
+        path: input.file_path.clone(),
+        content,
+        size,
+    })
+}
+
 // =============================================================================
 // External App Skills Scanning
 // =============================================================================
@@ -4410,6 +5451,102 @@ pub fn read_external_skill_content(path: &str) -> Result<String, String> {
     }
 
     fs::read_to_string(&skill_file).map_err(|e| format!("读取 SKILL.md 失败：{}", e))
+}
+
+pub fn scan_external_app_slash_commands(
+    _app: &tauri::AppHandle,
+    app_id: &str,
+) -> Result<Vec<crate::domain::ExternalSlashCommandDto>, String> {
+    use crate::domain::ExternalSlashCommandDto;
+
+    let home_dir = dirs::home_dir().ok_or_else(|| "无法获取用户主目录".to_string())?;
+    let command_dirs = app_command_dirs(&home_dir, app_id)?;
+
+    let mut commands: Vec<ExternalSlashCommandDto> = Vec::new();
+    let mut seen_slugs = HashSet::new();
+
+    for command_dir in command_dirs {
+        if !command_dir.exists() {
+            continue;
+        }
+
+        let entries = fs::read_dir(&command_dir).map_err(|e| format!("读取目录失败：{}", e))?;
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let command_file = path.join("COMMAND.md");
+            if !command_file.exists() {
+                continue;
+            }
+
+            let slug = match path.file_name() {
+                Some(name) => name.to_string_lossy().to_string(),
+                None => continue,
+            };
+
+            if !seen_slugs.insert(slug.clone()) {
+                continue;
+            }
+
+            let content = match fs::read_to_string(&command_file) {
+                Ok(content) => content,
+                Err(_) => continue,
+            };
+
+            let (name, description) = parse_skill_metadata(&content);
+            if name.is_empty() {
+                continue;
+            }
+
+            let metadata = fs::symlink_metadata(&path);
+            let is_symlink = metadata
+                .as_ref()
+                .map(|metadata| metadata.file_type().is_symlink())
+                .unwrap_or(false);
+
+            let symlink_target = if is_symlink {
+                fs::read_link(&path)
+                    .ok()
+                    .map(|target| target.to_string_lossy().to_string())
+            } else {
+                None
+            };
+
+            commands.push(ExternalSlashCommandDto {
+                slug,
+                name,
+                description,
+                app_id: app_id.to_string(),
+                path: path.to_string_lossy().to_string(),
+                is_symlink,
+                symlink_target,
+            });
+        }
+    }
+
+    commands.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    Ok(commands)
+}
+
+pub fn read_external_slash_command_content(path: &str) -> Result<String, String> {
+    let command_path = PathBuf::from(path);
+    let command_file = command_path.join("COMMAND.md");
+
+    if !command_file.exists() {
+        return Err("COMMAND.md 文件不存在".to_string());
+    }
+
+    fs::read_to_string(&command_file).map_err(|e| format!("读取 COMMAND.md 失败：{}", e))
 }
 
 #[cfg(test)]

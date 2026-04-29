@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub enum ResourceKind {
     Skill,
+    SlashCommand,
     Prompt,
     Agents,
 }
@@ -75,9 +76,11 @@ pub enum PreviewDecisionAction {
 #[serde(rename_all = "kebab-case")]
 pub enum InstallTargetKind {
     GlobalCodexSkill,
+    GlobalCodexSlashCommand,
     GlobalCodexPrompt,
     ProjectAgents,
     ProjectCodexSkill,
+    ProjectCodexSlashCommand,
 }
 
 // ─── Provenance types ─────────────────────────────────────────────────────────
@@ -363,6 +366,22 @@ pub struct LegacySkillDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SlashCommandDto {
+    pub id: String,
+    pub slug: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub tags: Vec<String>,
+    pub project_ids: Vec<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub provenance: Provenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackupSyncResult {
     pub status: String,
     pub attempts: usize,
@@ -374,6 +393,13 @@ pub struct BackupSyncResult {
 #[serde(rename_all = "camelCase")]
 pub struct CreateLegacySkillResult {
     pub skill: LegacySkillDto,
+    pub backup_sync: BackupSyncResult,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSlashCommandResult {
+    pub command: SlashCommandDto,
     pub backup_sync: BackupSyncResult,
 }
 
@@ -415,6 +441,19 @@ pub struct ExternalSkillDto {
     pub symlink_target: Option<String>, // if symlink, where it points to
 }
 
+/// A slash command found in an external app directory (not managed by SkillSwitch)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalSlashCommandDto {
+    pub slug: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub app_id: String,
+    pub path: String,
+    pub is_symlink: bool,
+    pub symlink_target: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LegacyProjectDto {
@@ -439,7 +478,29 @@ pub struct CreateSkillInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateSlashCommandInput {
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub directories: Vec<String>,
+    pub tags: Vec<String>,
+    pub project_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateSkillInput {
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub content: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub project_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSlashCommandInput {
     pub id: String,
     pub name: Option<String>,
     pub description: Option<Option<String>>,
@@ -646,6 +707,21 @@ pub struct InstallSkillToProjectResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InstallSlashCommandToProjectInput {
+    pub command_id: String,
+    pub project_path: String,
+    pub apps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSlashCommandToProjectResult {
+    pub installed_apps: Vec<String>,
+    pub failed_apps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoveProjectCliInput {
     pub project_path: String,
     pub apps: Vec<String>, // "claude", "codex", "cursor"
@@ -670,6 +746,20 @@ pub struct InstallSkillGlobalInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallSkillGlobalResult {
+    pub installed_apps: Vec<String>,
+    pub failed_apps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSlashCommandGlobalInput {
+    pub command_id: String,
+    pub apps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSlashCommandGlobalResult {
     pub installed_apps: Vec<String>,
     pub failed_apps: Vec<String>,
 }
@@ -769,6 +859,40 @@ pub struct SkillDirectoryInput {
 pub struct SkillFileInput {
     pub skill_id: String,
     pub file_path: String, // relative path from skill root
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandDirectoryListing {
+    pub command_id: String,
+    pub command_slug: String,
+    pub root_path: String,
+    pub current_path: String,
+    pub parent_path: Option<String>,
+    pub entries: Vec<SkillDirectoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandFileContent {
+    pub command_id: String,
+    pub path: String,
+    pub content: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandDirectoryInput {
+    pub command_id: String,
+    pub sub_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandFileInput {
+    pub command_id: String,
+    pub file_path: String,
 }
 
 // ─── Marketplace types ────────────────────────────────────────────────────────

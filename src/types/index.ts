@@ -65,7 +65,7 @@ export type Variant = "primary" | "secondary" | "danger" | "ghost";
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
 
-export type ResourceKind = "skill" | "prompt" | "agents";
+export type ResourceKind = "skill" | "slash-command" | "prompt" | "agents";
 export type ResourceScope = "global" | "project";
 export type ResourceOrigin = "private" | "vendor" | "forked-vendor";
 export type SourceStatus =
@@ -118,9 +118,11 @@ export type PreviewScope =
 export type PreviewAction = "apply" | "capture" | "ignore" | "refresh";
 export type InstallTargetKind =
   | "global-skill"
+  | "global-codex-slash-command"
   | "global-prompt"
   | "project-agents"
-  | "project-skill";
+  | "project-skill"
+  | "project-codex-slash-command";
 
 export interface Project {
   id: string;
@@ -144,8 +146,31 @@ export interface Skill {
   provenance?: Provenance;
 }
 
+export interface SlashCommand {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  content: string;
+  tags: string[];
+  projectIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  provenance?: Provenance;
+}
+
 /// A skill found in an external app directory (not managed by SkillSwitch)
 export interface ExternalSkill {
+  slug: string;
+  name: string;
+  description?: string | null;
+  appId: string;
+  path: string;
+  isSymlink: boolean;
+  symlinkTarget?: string | null;
+}
+
+export interface ExternalSlashCommand {
   slug: string;
   name: string;
   description?: string | null;
@@ -323,6 +348,15 @@ export interface CreateSkillInput {
   projectIds: string[];
 }
 
+export interface CreateSlashCommandInput {
+  name: string;
+  description?: string | null;
+  content: string;
+  directories: StandardSkillDirectory[];
+  tags: string[];
+  projectIds: string[];
+}
+
 export interface BackupSyncResult {
   status: "skipped" | "success" | "failed";
   attempts: number;
@@ -332,6 +366,11 @@ export interface BackupSyncResult {
 
 export interface CreateSkillResult {
   skill: Skill;
+  backupSync: BackupSyncResult;
+}
+
+export interface CreateSlashCommandResult {
+  command: SlashCommand;
   backupSync: BackupSyncResult;
 }
 
@@ -354,6 +393,15 @@ export interface SkillDeleteResult {
 }
 
 export interface UpdateSkillInput {
+  id: string;
+  name?: string;
+  description?: string | null;
+  content?: string;
+  tags?: string[];
+  projectIds?: string[];
+}
+
+export interface UpdateSlashCommandInput {
   id: string;
   name?: string;
   description?: string | null;
@@ -570,6 +618,16 @@ export interface InstallSkillGlobalResult {
   failedApps: string[];
 }
 
+export interface InstallSlashCommandGlobalInput {
+  commandId: string;
+  apps: string[];
+}
+
+export interface InstallSlashCommandGlobalResult {
+  installedApps: string[];
+  failedApps: string[];
+}
+
 // ─── Symlink status types ──────────────────────────────────────────────────────
 
 export interface SkillSymlinkStatus {
@@ -631,6 +689,32 @@ export interface SkillDirectoryInput {
 
 export interface SkillFileInput {
   skillId: string;
+  filePath: string;
+}
+
+export interface SlashCommandDirectoryListing {
+  commandId: string;
+  commandSlug: string;
+  rootPath: string;
+  currentPath: string;
+  parentPath?: string | null;
+  entries: SkillDirectoryEntry[];
+}
+
+export interface SlashCommandFileContent {
+  commandId: string;
+  path: string;
+  content: string;
+  size: number;
+}
+
+export interface SlashCommandDirectoryInput {
+  commandId: string;
+  subPath?: string | null;
+}
+
+export interface SlashCommandFileInput {
+  commandId: string;
   filePath: string;
 }
 
