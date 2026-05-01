@@ -603,10 +603,12 @@ function DetailPanel({
   skill,
   onDelete,
   onExport,
+  onSyncFromSource,
 }: {
   skill: Skill;
   onDelete: () => void;
   onExport: () => void;
+  onSyncFromSource: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("enable");
   const [previewingFile, setPreviewingFile] = useState<string | null>(null);
@@ -622,6 +624,7 @@ function DetailPanel({
     let disposed = false;
     let sourceDir = "";
     let inFlight = false;
+    let prevContent: string | null = null;
 
     const readContent = async () => {
       if (!sourceDir || inFlight) return;
@@ -630,7 +633,13 @@ function DetailPanel({
       inFlight = false;
       if (disposed) return;
       if (result.ok) {
-        setSkillmdContent(result.value);
+        const newContent = result.value;
+        // Detect external edit: content changed since last read → sync metadata
+        if (prevContent !== null && prevContent !== newContent) {
+          void onSyncFromSource(skill.id);
+        }
+        prevContent = newContent;
+        setSkillmdContent(newContent);
         setSkillmdError(null);
       } else {
         setSkillmdError(result.error);
@@ -659,7 +668,7 @@ function DetailPanel({
       disposed = true;
       clearInterval(timer);
     };
-  }, [skill.id]);
+  }, [skill.id, onSyncFromSource]);
 
   // Global app enable states — persisted per skillId in localStorage
   const globalStorageKey = `skill-global-${skill.id}`;
@@ -1600,6 +1609,7 @@ export function MyLibraryPage({
             skill={selectedSkill}
             onDelete={handleDelete}
             onExport={handleExport}
+            onSyncFromSource={syncFromSource}
           />
         )}
         {!selectedSkill &&
