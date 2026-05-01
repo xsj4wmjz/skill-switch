@@ -330,7 +330,10 @@ function SlashCommandDetail({
       : toast.loading(`正在移除全局 ${appLabel}…`);
 
     const result = newState
-      ? await slashCommandInstallGlobal({ commandId: command.id, apps: [appId] })
+      ? await slashCommandInstallGlobal({
+          commandId: command.id,
+          apps: [appId],
+        })
       : await slashCommandUninstallGlobal({
           commandId: command.id,
           apps: [appId],
@@ -881,7 +884,15 @@ function CreateSlashCommandModal({
   );
 }
 
-export function MySlashCommandsPage() {
+export function MySlashCommandsPage({
+  activeCommandMode,
+  onToggleCommandMode,
+  onNavigateToSelfCreated,
+}: {
+  activeCommandMode: "self-created" | "external";
+  onToggleCommandMode: () => void;
+  onNavigateToSelfCreated: () => void;
+}) {
   const {
     commands,
     externalCommands,
@@ -897,7 +908,6 @@ export function MySlashCommandsPage() {
   const [selectedExternalKey, setSelectedExternalKey] = useState<string | null>(
     null
   );
-  const [showExternal, setShowExternal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [importing, setImporting] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -946,18 +956,20 @@ export function MySlashCommandsPage() {
     });
   }, [externalCommands, searchQuery]);
 
-  const selectedCommand = showExternal
-    ? null
-    : (commands.find((command) => command.id === selectedId) ?? null);
+  const selectedCommand =
+    activeCommandMode === "external"
+      ? null
+      : (commands.find((command) => command.id === selectedId) ?? null);
   const selectedExternal =
-    showExternal && selectedExternalKey
+    activeCommandMode === "external" && selectedExternalKey
       ? (externalCommands.find(
-          (command) => `${command.appId}:${command.slug}` === selectedExternalKey
+          (command) =>
+            `${command.appId}:${command.slug}` === selectedExternalKey
         ) ?? null)
       : null;
 
   useEffect(() => {
-    if (showExternal) return;
+    if (activeCommandMode === "external") return;
     if (filteredCommands.length === 0) {
       setSelectedId(null);
       return;
@@ -965,10 +977,10 @@ export function MySlashCommandsPage() {
     if (!filteredCommands.some((command) => command.id === selectedId)) {
       setSelectedId(filteredCommands[0].id);
     }
-  }, [filteredCommands, selectedId, showExternal]);
+  }, [filteredCommands, selectedId, activeCommandMode]);
 
   useEffect(() => {
-    if (!showExternal) {
+    if (activeCommandMode !== "external") {
       setSelectedExternalKey(null);
       return;
     }
@@ -984,14 +996,14 @@ export function MySlashCommandsPage() {
       const first = filteredExternalCommands[0];
       setSelectedExternalKey(`${first.appId}:${first.slug}`);
     }
-  }, [filteredExternalCommands, selectedExternalKey, showExternal]);
+  }, [filteredExternalCommands, selectedExternalKey, activeCommandMode]);
 
   const handleCreate = async (input: CreateSlashCommandInput) => {
     const result = await create(input);
     if (result.ok) {
       toast.success(`「${result.value.command.name}」已创建`);
       setShowCreateModal(false);
-      setShowExternal(false);
+      onNavigateToSelfCreated();
       setSelectedId(result.value.command.id);
     } else {
       toast.error(`创建失败：${result.error}`);
@@ -1000,7 +1012,9 @@ export function MySlashCommandsPage() {
 
   const handleDelete = useCallback(async () => {
     if (!selectedCommand) return;
-    const confirmed = window.confirm(`删除 Slash Command「${selectedCommand.name}」？`);
+    const confirmed = window.confirm(
+      `删除 Slash Command「${selectedCommand.name}」？`
+    );
     if (!confirmed) return;
 
     const tid = toast.loading(`正在删除「${selectedCommand.name}」…`);
@@ -1030,7 +1044,7 @@ export function MySlashCommandsPage() {
       }
       toast.resolve(tid, "success", `「${result.value.name}」导入成功`);
       await refresh();
-      setShowExternal(false);
+      onNavigateToSelfCreated();
       setSelectedId(result.value.id);
     } catch (err) {
       toast.resolve(tid, "error", `导入失败：${String(err)}`);
@@ -1049,7 +1063,7 @@ export function MySlashCommandsPage() {
       if (result.ok) {
         toast.resolve(tid, "success", `「${result.value.name}」已导入`);
         await refresh();
-        setShowExternal(false);
+        onNavigateToSelfCreated();
         setSelectedId(result.value.id);
       } else {
         toast.resolve(tid, "error", result.error);
@@ -1085,13 +1099,13 @@ export function MySlashCommandsPage() {
   }, [selectedCommand, toast]);
 
   const renderList = () => {
-    if (showExternal) {
+    if (activeCommandMode === "external") {
       if (filteredExternalCommands.length === 0) {
         return (
           <div className={s.empty}>
             {searchQuery
-              ? "外部 Slash Commands 中未找到匹配项"
-              : "还没有发现可导入的外部 Slash Commands"}
+              ? "外部 Commands 中未找到匹配项"
+              : "还没有发现可导入的外部 Commands"}
           </div>
         );
       }
@@ -1114,8 +1128,8 @@ export function MySlashCommandsPage() {
       return (
         <div className={s.empty}>
           {searchQuery
-            ? "Slash Commands 中未找到匹配项"
-            : "还没有 Slash Command，点击「创建」添加"}
+            ? "自建 Commands 中未找到匹配项"
+            : "还没有 Command，点击「创建」添加"}
         </div>
       );
     }
@@ -1135,20 +1149,19 @@ export function MySlashCommandsPage() {
       <header className={s.header}>
         <div className={s.headerLeft}>
           <h1 className={s.headerTitle}>
-            {showExternal ? "外部 Slash Commands" : "Slash Commands"}
+            {activeCommandMode === "external"
+              ? "外部 Commands"
+              : "自建 Commands"}
           </h1>
           <span className={s.headerSub}>
-            {showExternal
+            {activeCommandMode === "external"
               ? `${filteredExternalCommands.length} 个`
               : `${filteredCommands.length} 个`}
           </span>
         </div>
         <div className={s.headerRight}>
-          <button
-            className={s.importBtn}
-            onClick={() => setShowExternal((prev) => !prev)}
-          >
-            {showExternal ? "我的 Commands" : "外部"}
+          <button className={s.importBtn} onClick={onToggleCommandMode}>
+            {activeCommandMode === "external" ? "自建" : "外部"}
           </button>
           <div className={s.searchWrap}>
             <Search size={14} className={s.searchIcon} />
@@ -1207,24 +1220,27 @@ export function MySlashCommandsPage() {
             onExport={handleExport}
           />
         )}
-        {!selectedCommand && showExternal && selectedExternal && (
-          <ExternalCommandDetail
-            key={`${selectedExternal.appId}:${selectedExternal.slug}`}
-            command={selectedExternal}
-            onImport={() => handleImportExternal(selectedExternal)}
-          />
-        )}
-        {!selectedCommand && (!showExternal || !selectedExternal) && (
-          <div className={s.detailPlaceholder}>
-            <div className={s.detailPlaceholderIcon}>
-              <FileText size={18} />
+        {!selectedCommand &&
+          activeCommandMode === "external" &&
+          selectedExternal && (
+            <ExternalCommandDetail
+              key={`${selectedExternal.appId}:${selectedExternal.slug}`}
+              command={selectedExternal}
+              onImport={() => handleImportExternal(selectedExternal)}
+            />
+          )}
+        {!selectedCommand &&
+          (activeCommandMode !== "external" || !selectedExternal) && (
+            <div className={s.detailPlaceholder}>
+              <div className={s.detailPlaceholderIcon}>
+                <FileText size={18} />
+              </div>
+              <div className={s.detailPlaceholderTitle}>Commands</div>
+              <div className={s.detailPlaceholderHint}>
+                选择一个命令查看启用状态和 COMMAND.md。
+              </div>
             </div>
-            <div className={s.detailPlaceholderTitle}>Slash Commands</div>
-            <div className={s.detailPlaceholderHint}>
-              选择一个命令查看启用状态和 COMMAND.md。
-            </div>
-          </div>
-        )}
+          )}
       </div>
 
       {showCreateModal && (

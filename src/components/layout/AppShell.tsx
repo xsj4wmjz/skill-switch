@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import type { PageId, LibraryTab } from "../../App";
+import type { PageId, LibraryTab, CommandMode } from "../../App";
 import { useSkills } from "../../context/SkillContext";
 import { useSlashCommands } from "../../context/SlashCommandContext";
 import { APP_LIST } from "../../context/AppContext";
@@ -9,11 +9,27 @@ import { useToast } from "../ui/Toast";
 import { BACKUP_SOURCE_REPO_ID } from "../../services/backupSource";
 import { MARKET_SOURCE_ID } from "../../services/marketplace";
 import { REGISTRY_SOURCE_ID } from "../../services/registry";
-import { repoSourceDelete, repoSourceNeedsSync, repoSourceSync } from "../../services/repoSource";
+import {
+  repoSourceDelete,
+  repoSourceNeedsSync,
+  repoSourceSync,
+} from "../../services/repoSource";
 import type { ThirdPartyRepo } from "../../types";
 import {
-  Plus, Settings, Zap, Sparkles, Database,
-  BookMarked, Globe, X, Loader, Cloud, RefreshCw, Trash2, ExternalLink, ChevronRight,
+  Plus,
+  Settings,
+  Zap,
+  Sparkles,
+  Database,
+  BookMarked,
+  Globe,
+  X,
+  Loader,
+  Cloud,
+  RefreshCw,
+  Trash2,
+  ExternalLink,
+  ChevronRight,
   TerminalSquare,
 } from "lucide-react";
 import s from "./AppShell.module.css";
@@ -22,11 +38,13 @@ interface Props {
   activePage: PageId;
   activeRepoId: string | null;
   activeLibraryTab: LibraryTab;
+  activeCommandMode: CommandMode;
   externalAppFilter: string | null;
   onNavigate: (page: PageId) => void;
   onNavigateRepo: (repoId: string) => void;
   onNavigateLibraryTab: (tab: LibraryTab) => void;
   onNavigateExternalApp: (appId: string) => void;
+  onToggleCommandMode: () => void;
   children: React.ReactNode;
 }
 
@@ -51,7 +69,10 @@ function formatRepoMeta(url: string, hasLocalSync: boolean): string {
 }
 
 // ── Add Repo Modal ────────────────────────────────────────────────────────────
-function AddRepoModal({ onClose, onAdd }: {
+function AddRepoModal({
+  onClose,
+  onAdd,
+}: {
   onClose: () => void;
   onAdd: (url: string) => Promise<string | null>; // returns error string or null
 }) {
@@ -60,11 +81,16 @@ function AddRepoModal({ onClose, onAdd }: {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const handleAdd = async () => {
     const trimmed = url.trim();
-    if (!trimmed) { setError("请输入仓库地址"); return; }
+    if (!trimmed) {
+      setError("请输入仓库地址");
+      return;
+    }
     if (!trimmed.startsWith("https://github.com/")) {
       setError("仅支持 https://github.com/ 开头的地址");
       return;
@@ -73,15 +99,21 @@ function AddRepoModal({ onClose, onAdd }: {
     setError(null);
     const err = await onAdd(trimmed);
     setLoading(false);
-    if (err) { setError(err); } else { onClose(); }
+    if (err) {
+      setError(err);
+    } else {
+      onClose();
+    }
   };
 
   return (
     <div className={s.modalOverlay} onClick={onClose}>
-      <div className={s.modal} onClick={e => e.stopPropagation()}>
+      <div className={s.modal} onClick={(e) => e.stopPropagation()}>
         <div className={s.modalHeader}>
           <span className={s.modalTitle}>添加仓库源</span>
-          <button className={s.modalClose} onClick={onClose}><X size={14} /></button>
+          <button className={s.modalClose} onClick={onClose}>
+            <X size={14} />
+          </button>
         </div>
         <div className={s.modalBody}>
           <div className={s.modalLabel}>GitHub 仓库地址</div>
@@ -89,17 +121,34 @@ function AddRepoModal({ onClose, onAdd }: {
             ref={inputRef}
             className={`${s.modalInput} ${error ? s.modalInputError : ""}`}
             value={url}
-            onChange={e => { setUrl(e.target.value); setError(null); }}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              setError(null);
+            }}
             placeholder="https://github.com/owner/repo"
-            onKeyDown={e => e.key === "Enter" && handleAdd()}
+            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           />
           {error && <div className={s.modalError}>{error}</div>}
-          <div className={s.modalHint}>支持任意公开 GitHub 仓库，技能需以 SKILL.md 文件标识</div>
+          <div className={s.modalHint}>
+            支持任意公开 GitHub 仓库，技能需以 SKILL.md 文件标识
+          </div>
         </div>
         <div className={s.modalFooter}>
-          <button className={s.modalCancelBtn} onClick={onClose}>取消</button>
-          <button className={s.modalAddBtn} onClick={handleAdd} disabled={loading}>
-            {loading ? <><Loader size={12} className={s.btnSpin} /> 添加中…</> : "添加"}
+          <button className={s.modalCancelBtn} onClick={onClose}>
+            取消
+          </button>
+          <button
+            className={s.modalAddBtn}
+            onClick={handleAdd}
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <Loader size={12} className={s.btnSpin} /> 添加中…
+              </>
+            ) : (
+              "添加"
+            )}
           </button>
         </div>
       </div>
@@ -107,7 +156,19 @@ function AddRepoModal({ onClose, onAdd }: {
   );
 }
 
-export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalAppFilter, onNavigate, onNavigateRepo, onNavigateLibraryTab, onNavigateExternalApp, children }: Props) {
+export function AppShell({
+  activePage,
+  activeRepoId,
+  activeLibraryTab,
+  activeCommandMode,
+  externalAppFilter,
+  onNavigate,
+  onNavigateRepo,
+  onNavigateLibraryTab,
+  onNavigateExternalApp,
+  onToggleCommandMode,
+  children,
+}: Props) {
   const { skills, externalSkills } = useSkills();
   const { commands, externalCommands } = useSlashCommands();
   const { settings, updateSettings } = useSettings();
@@ -121,73 +182,87 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
   const repos: ThirdPartyRepo[] = settings.thirdPartyRepos ?? [];
   const backupSource = settings.backupSource;
   const backupState = sourceStates.get(BACKUP_SOURCE_REPO_ID);
-  const isBackupActive = activePage === "repo-browse" && activeRepoId === BACKUP_SOURCE_REPO_ID;
-  const isMarketActive = activePage === "repo-browse" && activeRepoId === MARKET_SOURCE_ID;
-  const isRegistryActive = activePage === "repo-browse" && activeRepoId === REGISTRY_SOURCE_ID;
+  const isBackupActive =
+    activePage === "repo-browse" && activeRepoId === BACKUP_SOURCE_REPO_ID;
+  const isMarketActive =
+    activePage === "repo-browse" && activeRepoId === MARKET_SOURCE_ID;
+  const isRegistryActive =
+    activePage === "repo-browse" && activeRepoId === REGISTRY_SOURCE_ID;
   const isSyncingAllRepos = repoSyncing === "__all__";
 
   // Market source summary with total count
-  const marketSummary = marketState.status === "loading"
-    ? "加载中"
-    : marketState.status === "error"
-    ? "加载失败"
-    : marketState.total > 0
-    ? `${marketState.total.toLocaleString()} 项`
-    : "内置市场";
+  const marketSummary =
+    marketState.status === "loading"
+      ? "加载中"
+      : marketState.status === "error"
+        ? "加载失败"
+        : marketState.total > 0
+          ? `${marketState.total.toLocaleString()} 项`
+          : "内置市场";
 
-  const handleAddRepo = useCallback(async (url: string): Promise<string | null> => {
-    if (repos.some(r => r.url === url)) return "该仓库已添加";
-    const parts = url.replace(/\/$/, "").split("/");
-    const label = `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-    const newRepo: ThirdPartyRepo = {
-      id: `custom-${Date.now()}`,
-      url,
-      label,
-      enabled: true,
-      addedAt: Date.now(),
-      localPath: null,
-      lastSyncedAt: null,
-    };
+  const handleAddRepo = useCallback(
+    async (url: string): Promise<string | null> => {
+      if (repos.some((r) => r.url === url)) return "该仓库已添加";
+      const parts = url.replace(/\/$/, "").split("/");
+      const label = `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+      const newRepo: ThirdPartyRepo = {
+        id: `custom-${Date.now()}`,
+        url,
+        label,
+        enabled: true,
+        addedAt: Date.now(),
+        localPath: null,
+        lastSyncedAt: null,
+      };
 
-    setRepoSyncing(newRepo.id);
-    const syncResult = await repoSourceSync(newRepo);
-    setRepoSyncing(null);
+      setRepoSyncing(newRepo.id);
+      const syncResult = await repoSourceSync(newRepo);
+      setRepoSyncing(null);
 
-    if (!syncResult.ok) {
-      return `克隆失败：${syncResult.error}`;
-    }
+      if (!syncResult.ok) {
+        return `克隆失败：${syncResult.error}`;
+      }
 
-    const ok = await updateSettings({ thirdPartyRepos: [...repos, syncResult.value] });
-    if (!ok) {
-      await repoSourceDelete(syncResult.value);
-      return "保存失败，请重试";
-    }
+      const ok = await updateSettings({
+        thirdPartyRepos: [...repos, syncResult.value],
+      });
+      if (!ok) {
+        await repoSourceDelete(syncResult.value);
+        return "保存失败，请重试";
+      }
 
-    toast.success(`已添加 ${label}`);
-    return null;
-  }, [repos, toast, updateSettings]);
+      toast.success(`已添加 ${label}`);
+      return null;
+    },
+    [repos, toast, updateSettings]
+  );
 
-  const handleSyncRepo = useCallback(async (repo: ThirdPartyRepo) => {
-    setRepoSyncing(repo.id);
-    const result = await repoSourceSync(repo);
-    setRepoSyncing(null);
+  const handleSyncRepo = useCallback(
+    async (repo: ThirdPartyRepo) => {
+      setRepoSyncing(repo.id);
+      const result = await repoSourceSync(repo);
+      setRepoSyncing(null);
 
-    if (!result.ok) {
-      toast.error(`更新失败：${result.error}`);
-      return;
-    }
+      if (!result.ok) {
+        toast.error(`更新失败：${result.error}`);
+        return;
+      }
 
-    const saved = await updateSettings({
-      thirdPartyRepos: repos.map((item) => (item.id === repo.id ? result.value : item)),
-    });
-    if (!saved) {
-      toast.error("仓库源信息保存失败");
-      return;
-    }
+      const saved = await updateSettings({
+        thirdPartyRepos: repos.map((item) =>
+          item.id === repo.id ? result.value : item
+        ),
+      });
+      if (!saved) {
+        toast.error("仓库源信息保存失败");
+        return;
+      }
 
-    refresh(repo.id);
-    toast.success(`已更新 ${repo.label}`);
-  }, [refresh, repos, toast, updateSettings]);
+      refresh(repo.id);
+      toast.success(`已更新 ${repo.label}`);
+    },
+    [refresh, repos, toast, updateSettings]
+  );
 
   const handleSyncAllRepos = useCallback(async () => {
     if (repos.length === 0) return;
@@ -200,7 +275,9 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
     for (const repo of repos) {
       const result = await repoSourceSync(repo);
       if (result.ok) {
-        nextRepos = nextRepos.map((item) => (item.id === repo.id ? result.value : item));
+        nextRepos = nextRepos.map((item) =>
+          item.id === repo.id ? result.value : item
+        );
         successCount += 1;
       } else {
         failedCount += 1;
@@ -223,34 +300,39 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
     toast.success(`已更新全部 ${successCount} 个仓库源`);
   }, [refresh, repos, toast, updateSettings]);
 
-  const handleDeleteRepo = useCallback(async (repo: ThirdPartyRepo) => {
-    const confirmed = window.confirm(`删除仓库源「${repo.label}」？这会移除本地克隆。`);
-    if (!confirmed) {
-      return;
-    }
+  const handleDeleteRepo = useCallback(
+    async (repo: ThirdPartyRepo) => {
+      const confirmed = window.confirm(
+        `删除仓库源「${repo.label}」？这会移除本地克隆。`
+      );
+      if (!confirmed) {
+        return;
+      }
 
-    setRepoDeleting(repo.id);
-    const removeResult = await repoSourceDelete(repo);
-    setRepoDeleting(null);
+      setRepoDeleting(repo.id);
+      const removeResult = await repoSourceDelete(repo);
+      setRepoDeleting(null);
 
-    if (!removeResult.ok) {
-      toast.error(`删除失败：${removeResult.error}`);
-      return;
-    }
+      if (!removeResult.ok) {
+        toast.error(`删除失败：${removeResult.error}`);
+        return;
+      }
 
-    const saved = await updateSettings({
-      thirdPartyRepos: repos.filter((item) => item.id !== repo.id),
-    });
-    if (!saved) {
-      toast.error("仓库列表保存失败");
-      return;
-    }
+      const saved = await updateSettings({
+        thirdPartyRepos: repos.filter((item) => item.id !== repo.id),
+      });
+      if (!saved) {
+        toast.error("仓库列表保存失败");
+        return;
+      }
 
-    if (activePage === "repo-browse" && activeRepoId === repo.id) {
-      onNavigate("my-library");
-    }
-    toast.success("仓库源已删除，并移除了本地克隆");
-  }, [activePage, activeRepoId, onNavigate, repos, toast, updateSettings]);
+      if (activePage === "repo-browse" && activeRepoId === repo.id) {
+        onNavigate("my-library");
+      }
+      toast.success("仓库源已删除，并移除了本地克隆");
+    },
+    [activePage, activeRepoId, onNavigate, repos, toast, updateSettings]
+  );
 
   const selfCreatedCount = skills.length;
   const externalCount = externalSkills.length;
@@ -258,55 +340,65 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
   const externalSlashCommandCount = externalCommands.length;
 
   // Per-app external skill counts for sidebar sub-items
-  const externalAppGroups = useMemo(() =>
-    APP_LIST.map((app) => ({
-      appId: app.id,
-      label: app.label,
-      iconSrc: app.iconSrc,
-      count: externalSkills.filter((sk) => sk.appId === app.id).length,
-    })).filter((g) => g.count > 0),
-    [externalSkills],
+  const externalAppGroups = useMemo(
+    () =>
+      APP_LIST.map((app) => ({
+        appId: app.id,
+        label: app.label,
+        iconSrc: app.iconSrc,
+        count: externalSkills.filter((sk) => sk.appId === app.id).length,
+      })).filter((g) => g.count > 0),
+    [externalSkills]
   );
 
   useEffect(() => {
-    if (activePage === "my-library" && activeLibraryTab === "external" && externalAppFilter) {
+    if (
+      activePage === "my-library" &&
+      activeLibraryTab === "external" &&
+      externalAppFilter
+    ) {
       setExternalExpanded(true);
     }
   }, [activeLibraryTab, activePage, externalAppFilter]);
 
-  const isExternalExpanded = externalExpanded
-    || (activePage === "my-library" && activeLibraryTab === "external" && !!externalAppFilter);
-  const isExternalActive = activePage === "my-library" && activeLibraryTab === "external";
+  const isExternalExpanded =
+    externalExpanded ||
+    (activePage === "my-library" &&
+      activeLibraryTab === "external" &&
+      !!externalAppFilter);
+  const isExternalActive =
+    activePage === "my-library" && activeLibraryTab === "external";
 
   const backupSourceBadge = !backupSource
     ? "未配置"
     : backupState?.status === "loading"
-    ? "读取中"
-    : backupState?.status === "error"
-    ? "异常"
-    : "已配置";
+      ? "读取中"
+      : backupState?.status === "error"
+        ? "异常"
+        : "已配置";
 
   return (
     <div className={s.shell}>
       <aside className={s.sidebar}>
         {/* Logo - fixed at top */}
         <div className={s.logo}>
-          <div className={s.logoIcon}><Zap size={18} /></div>
+          <div className={s.logoIcon}>
+            <Zap size={18} />
+          </div>
           <span className={s.logoName}>SkillSwitch</span>
         </div>
 
         {/* Scrollable content */}
         <div className={s.sidebarScroll}>
-
           {/* Nav */}
           <nav className={s.nav}>
-            {/* ── 我的库 section (backup-source style) ── */}
+            {/* ── Skills section ── */}
             <div className={s.backupSection}>
               <div className={s.reposHeader}>
-                <span>我的库</span>
+                <span>Skills</span>
               </div>
 
-              {/* 自建 */}
+              {/* 自建 Skills */}
               <button
                 className={`${s.libraryItem} ${activePage === "my-library" && activeLibraryTab === "self-created" ? s.libraryItemActive : ""}`}
                 onClick={() => onNavigateLibraryTab("self-created")}
@@ -316,25 +408,12 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                   <span className={s.backupName}>自建</span>
                   <span className={s.backupMeta}>本地创建和导入的 Skills</span>
                 </span>
-                <span className={s.backupRight}>{selfCreatedCount > 0 ? `${selfCreatedCount} 项` : ""}</span>
-              </button>
-
-              <button
-                className={`${s.libraryItem} ${activePage === "my-commands" ? s.libraryItemActive : ""}`}
-                onClick={() => onNavigate("my-commands")}
-              >
-                <TerminalSquare size={12} className={s.libraryItemIcon} />
-                <span className={s.backupNameWrap}>
-                  <span className={s.backupName}>Slash Commands</span>
-                  <span className={s.backupMeta}>管理 .commands 目录中的命令</span>
-                </span>
                 <span className={s.backupRight}>
-                  {slashCommandCount > 0 ? `${slashCommandCount} 项` : ""}
-                  {externalSlashCommandCount > 0 ? ` · 外部 ${externalSlashCommandCount}` : ""}
+                  {selfCreatedCount > 0 ? `${selfCreatedCount} 项` : ""}
                 </span>
               </button>
 
-              {/* 外部 — collapsible with per-CLI sub-items */}
+              {/* 外部 Skills — collapsible with per-CLI sub-items */}
               <button
                 className={`${s.libraryItem} ${isExternalActive || isExternalExpanded ? s.libraryItemActive : ""}`}
                 onClick={() => setExternalExpanded((prev) => !prev)}
@@ -346,7 +425,10 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                 </span>
                 <span className={s.backupRight}>
                   {externalCount > 0 ? `${externalCount} 项` : ""}
-                  <ChevronRight size={10} className={`${s.libraryChevron} ${isExternalExpanded ? s.libraryChevronOpen : ""}`} />
+                  <ChevronRight
+                    size={10}
+                    className={`${s.libraryChevron} ${isExternalExpanded ? s.libraryChevronOpen : ""}`}
+                  />
                 </span>
               </button>
 
@@ -361,15 +443,70 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                         className={`${s.librarySubItem} ${isSubActive ? s.librarySubItemActive : ""}`}
                         onClick={() => onNavigateExternalApp(group.appId)}
                       >
-                        <img src={group.iconSrc} alt="" className={s.librarySubItemIcon} />
-                        <span className={s.librarySubItemLabel}>{group.label}</span>
-                        <span className={s.librarySubItemCount}>{group.count}</span>
+                        <img
+                          src={group.iconSrc}
+                          alt=""
+                          className={s.librarySubItemIcon}
+                        />
+                        <span className={s.librarySubItemLabel}>
+                          {group.label}
+                        </span>
+                        <span className={s.librarySubItemCount}>
+                          {group.count}
+                        </span>
                       </button>
                     );
                   })}
                 </div>
               )}
+            </div>
 
+            {/* ── Commands section ── */}
+            <div className={s.backupSection}>
+              <div className={s.reposHeader}>
+                <span>Commands</span>
+              </div>
+
+              {/* 自建 Commands */}
+              <button
+                className={`${s.libraryItem} ${activePage === "my-commands" && activeCommandMode === "self-created" ? s.libraryItemActive : ""}`}
+                onClick={() => {
+                  onNavigate("my-commands");
+                  if (activeCommandMode !== "self-created")
+                    onToggleCommandMode();
+                }}
+              >
+                <TerminalSquare size={12} className={s.libraryItemIcon} />
+                <span className={s.backupNameWrap}>
+                  <span className={s.backupName}>自建</span>
+                  <span className={s.backupMeta}>本地创建的 Commands</span>
+                </span>
+                <span className={s.backupRight}>
+                  {slashCommandCount > 0 ? `${slashCommandCount} 项` : ""}
+                </span>
+              </button>
+
+              {/* 外部 Commands */}
+              <button
+                className={`${s.libraryItem} ${activePage === "my-commands" && activeCommandMode === "external" ? s.libraryItemActive : ""}`}
+                onClick={() => {
+                  onNavigate("my-commands");
+                  if (activeCommandMode !== "external") onToggleCommandMode();
+                }}
+              >
+                <ExternalLink size={12} className={s.libraryItemIcon} />
+                <span className={s.backupNameWrap}>
+                  <span className={s.backupName}>外部</span>
+                  <span className={s.backupMeta}>
+                    CLI 目录中发现的 Commands
+                  </span>
+                </span>
+                <span className={s.backupRight}>
+                  {externalSlashCommandCount > 0
+                    ? `${externalSlashCommandCount} 项`
+                    : ""}
+                </span>
+              </button>
             </div>
 
             {/* Backup Source Pin */}
@@ -390,7 +527,9 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                 >
                   <Cloud size={12} className={s.backupIcon} />
                   <span className={s.backupNameWrap}>
-                    <span className={s.backupName}>{backupSource.repo || backupSource.label}</span>
+                    <span className={s.backupName}>
+                      {backupSource.repo || backupSource.label}
+                    </span>
                     <span className={s.backupMeta}>
                       {backupSource.repo} · {backupSource.branch}
                     </span>
@@ -399,10 +538,10 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                     {backupState?.status === "loading"
                       ? "读取中"
                       : backupState?.status === "error"
-                      ? "需检查"
-                      : backupState?.skills.length != null
-                      ? `${backupState.skills.length} 项`
-                      : formatSidebarSyncDate(backupSource.lastSyncedAt)}
+                        ? "需检查"
+                        : backupState?.skills.length != null
+                          ? `${backupState.skills.length} 项`
+                          : formatSidebarSyncDate(backupSource.lastSyncedAt)}
                   </span>
                 </button>
               ) : (
@@ -414,7 +553,9 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                   <Cloud size={12} className={s.backupIcon} />
                   <span className={s.backupNameWrap}>
                     <span className={s.backupName}>备份源未配置</span>
-                    <span className={s.backupMeta}>去设置页填写 SSH 仓库与分支</span>
+                    <span className={s.backupMeta}>
+                      去设置页填写 SSH 仓库与分支
+                    </span>
                   </span>
                   <span className={s.backupRight}>设置</span>
                 </button>
@@ -433,7 +574,11 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                       title="更新全部仓库源"
                       disabled={isSyncingAllRepos || repoDeleting !== null}
                     >
-                      {isSyncingAllRepos ? <Loader size={12} className={s.repoSpinner} /> : <RefreshCw size={12} />}
+                      {isSyncingAllRepos ? (
+                        <Loader size={12} className={s.repoSpinner} />
+                      ) : (
+                        <RefreshCw size={12} />
+                      )}
                     </button>
                   )}
                   <button
@@ -455,13 +600,20 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                   onClick={() => onNavigateRepo(REGISTRY_SOURCE_ID)}
                   title="在线搜索 skills.sh"
                 >
-                  <Database size={12} className={`${s.backupIcon} ${s.registryIcon}`} />
+                  <Database
+                    size={12}
+                    className={`${s.backupIcon} ${s.registryIcon}`}
+                  />
                   <span className={s.backupNameWrap}>
                     <span className={s.backupName}>在线搜索</span>
                     <span className={s.backupMeta}>github.com · 全网技能</span>
                   </span>
                   <span className={`${s.backupRight} ${s.repoSummary}`}>
-                    {registryState.status === "loading" ? "搜索中..." : registryState.skills.length > 0 ? `${registryState.skills.length} 项结果` : "skills.sh"}
+                    {registryState.status === "loading"
+                      ? "搜索中..."
+                      : registryState.skills.length > 0
+                        ? `${registryState.skills.length} 项结果`
+                        : "skills.sh"}
                   </span>
                 </button>
               </div>
@@ -475,21 +627,28 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                   onClick={() => onNavigateRepo(MARKET_SOURCE_ID)}
                   title="内置技能市场"
                 >
-                  <Sparkles size={12} className={`${s.backupIcon} ${s.marketIcon}`} />
+                  <Sparkles
+                    size={12}
+                    className={`${s.backupIcon} ${s.marketIcon}`}
+                  />
                   <span className={s.backupNameWrap}>
                     <span className={s.backupName}>技能市场</span>
                     <span className={s.backupMeta}>内置 · 精选技能</span>
                   </span>
-                  <span className={`${s.backupRight} ${s.repoSummary}`}>{marketSummary}</span>
+                  <span className={`${s.backupRight} ${s.repoSummary}`}>
+                    {marketSummary}
+                  </span>
                 </button>
                 {/* No actions for market source - it's a system item */}
               </div>
 
               {/* Third-party repo sources */}
-              {repos.map(repo => {
+              {repos.map((repo) => {
                 const state = sourceStates.get(repo.id);
-                const isActive = activePage === "repo-browse" && activeRepoId === repo.id;
-                const syncInFlight = repoSyncing === repo.id || isSyncingAllRepos;
+                const isActive =
+                  activePage === "repo-browse" && activeRepoId === repo.id;
+                const syncInFlight =
+                  repoSyncing === repo.id || isSyncingAllRepos;
                 const deleteInFlight = repoDeleting === repo.id;
                 const count = state?.skills.length ?? null;
                 const loading = syncInFlight || state?.status === "loading";
@@ -498,14 +657,14 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                 const summary = loading
                   ? "更新中"
                   : deleteInFlight
-                  ? "删除中"
-                  : needsSync
-                  ? "未同步"
-                  : state?.status === "error"
-                  ? "需检查"
-                  : count != null
-                  ? `${count} 项`
-                  : formatSidebarSyncDate(repo.lastSyncedAt);
+                    ? "删除中"
+                    : needsSync
+                      ? "未同步"
+                      : state?.status === "error"
+                        ? "需检查"
+                        : count != null
+                          ? `${count} 项`
+                          : formatSidebarSyncDate(repo.lastSyncedAt);
                 return (
                   <div
                     key={repo.id}
@@ -517,12 +676,17 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                       title={repo.url}
                       disabled={deleteInFlight}
                     >
-                      <Globe size={12} className={`${s.backupIcon} ${s.repoIcon}`} />
+                      <Globe
+                        size={12}
+                        className={`${s.backupIcon} ${s.repoIcon}`}
+                      />
                       <span className={s.backupNameWrap}>
                         <span className={s.backupName}>{repo.label}</span>
                         <span className={s.backupMeta}>{meta}</span>
                       </span>
-                      <span className={`${s.backupRight} ${s.repoSummary}`}>{summary}</span>
+                      <span className={`${s.backupRight} ${s.repoSummary}`}>
+                        {summary}
+                      </span>
                     </button>
                     <div className={s.repoActions}>
                       <button
@@ -531,9 +695,15 @@ export function AppShell({ activePage, activeRepoId, activeLibraryTab, externalA
                         onClick={() => handleSyncRepo(repo)}
                         title="更新仓库源"
                         aria-label={`更新仓库源 ${repo.label}`}
-                        disabled={syncInFlight || deleteInFlight || isSyncingAllRepos}
+                        disabled={
+                          syncInFlight || deleteInFlight || isSyncingAllRepos
+                        }
                       >
-                        {loading ? <Loader size={11} className={s.repoSpinner} /> : <RefreshCw size={11} />}
+                        {loading ? (
+                          <Loader size={11} className={s.repoSpinner} />
+                        ) : (
+                          <RefreshCw size={11} />
+                        )}
                         <span>更新仓库源</span>
                       </button>
                       <button

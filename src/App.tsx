@@ -25,6 +25,7 @@ export type PageId =
   | "create"
   | "settings";
 export type LibraryTab = "self-created" | "external";
+export type CommandMode = "self-created" | "external";
 
 function BackupGate({ children }: { children: React.ReactNode }) {
   const { settings, loading } = useSettings();
@@ -44,6 +45,8 @@ export default function App() {
   const [activeRepoId, setActiveRepoId] = useState<string | null>(null);
   const [activeLibraryTab, setActiveLibraryTab] =
     useState<LibraryTab>("self-created");
+  const [activeCommandMode, setActiveCommandMode] =
+    useState<CommandMode>("self-created");
   const [externalAppFilter, setExternalAppFilter] = useState<string | null>(
     null
   );
@@ -78,7 +81,17 @@ export default function App() {
           />
         );
       case "my-commands":
-        return <MySlashCommandsPage />;
+        return (
+          <MySlashCommandsPage
+            activeCommandMode={activeCommandMode}
+            onToggleCommandMode={() =>
+              setActiveCommandMode((prev) =>
+                prev === "self-created" ? "external" : "self-created"
+              )
+            }
+            onNavigateToSelfCreated={() => setActiveCommandMode("self-created")}
+          />
+        );
       case "repo-browse":
         return <RepoBrowsePage repoId={activeRepoId ?? ""} />;
       case "create":
@@ -102,11 +115,19 @@ export default function App() {
                         activePage={activePage}
                         activeRepoId={activeRepoId}
                         activeLibraryTab={activeLibraryTab}
+                        activeCommandMode={activeCommandMode}
                         externalAppFilter={externalAppFilter}
                         onNavigate={setActivePage}
                         onNavigateRepo={navigateToRepo}
                         onNavigateLibraryTab={navigateToLibraryTab}
                         onNavigateExternalApp={navigateToExternalApp}
+                        onToggleCommandMode={() =>
+                          setActiveCommandMode((prev) =>
+                            prev === "self-created"
+                              ? "external"
+                              : "self-created"
+                          )
+                        }
                       >
                         {renderPage()}
                       </AppShell>
