@@ -135,6 +135,7 @@ function CommandCard({
           <p className={s.cardDesc}>{command.description || "无描述"}</p>
           <div className={s.cardFooter}>
             <span className={s.cardSlug}>{command.slug}</span>
+            <span className={s.cardBadgeExternal}>仅 Claude</span>
           </div>
         </div>
       </div>
@@ -186,6 +187,7 @@ function ExternalCommandCard({
           <p className={s.cardDesc}>{command.description || "无描述"}</p>
           <div className={s.cardFooter}>
             <span className={s.cardSlug}>{command.slug}</span>
+            <span className={s.cardBadgeExternal}>仅 Claude</span>
           </div>
         </div>
         <button
@@ -555,7 +557,7 @@ function SlashCommandDetail({
                 <span className={s.enableSectionHint}>(所有项目生效)</span>
               </div>
               <div className={s.globalApps}>
-                {APP_LIST.map((app) => (
+                {APP_LIST.filter((a) => a.id === "claude").map((app) => (
                   <label key={app.id} className={s.globalAppItem}>
                     <input
                       type="checkbox"
@@ -605,7 +607,7 @@ function SlashCommandDetail({
                       />
                     </div>
                     <div className={s.projectApps}>
-                      {APP_LIST.map((app) => (
+                      {APP_LIST.filter((a) => a.id === "claude").map((app) => (
                         <label key={app.id} className={s.projectAppItem}>
                           <input
                             type="checkbox"

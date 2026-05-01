@@ -465,6 +465,7 @@ export function AppShell({
             <div className={s.backupSection}>
               <div className={s.reposHeader}>
                 <span>Commands</span>
+                <span className={s.backupStateBadge}>仅 Claude</span>
               </div>
 
               {/* 自建 Commands */}
