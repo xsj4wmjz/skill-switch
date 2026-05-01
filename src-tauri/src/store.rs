@@ -1613,7 +1613,7 @@ fn project_target_path(project_root: &Path, resource: &Resource) -> (PathBuf, St
             (project_root.join(&relative), relative)
         }
         ResourceKind::SlashCommand => {
-            let relative = format!(".codex/commands/{}/COMMAND.md", resource.slug);
+            let relative = format!(".codex/commands/{}.md", resource.slug);
             (project_root.join(&relative), relative)
         }
         ResourceKind::Prompt => {
@@ -3082,8 +3082,7 @@ fn global_target_path(codex_home: &Path, resource: &Resource) -> PathBuf {
             .join("SKILL.md"),
         ResourceKind::SlashCommand => codex_home
             .join("commands")
-            .join(&resource.slug)
-            .join("COMMAND.md"),
+            .join(format!("{}.md", resource.slug)),
         ResourceKind::Prompt => codex_home
             .join("prompts")
             .join(format!("{}.md", resource.slug)),
@@ -3119,8 +3118,8 @@ fn discover_local_codex_files(codex_home: &Path) -> Result<Vec<PathBuf>, String>
     if commands_root.exists() {
         for entry in fs::read_dir(&commands_root).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
-            let file = entry.path().join("COMMAND.md");
-            if file.exists() {
+            let file = entry.path();
+            if file.extension().and_then(|ext| ext.to_str()) == Some("md") {
                 items.push(file);
             }
         }
@@ -5479,57 +5478,101 @@ pub fn scan_external_app_slash_commands(
             };
 
             let path = entry.path();
-            if !path.is_dir() {
-                continue;
+
+            // Case 1: subdirectory with COMMAND.md (e.g. ~/.claude/commands/my-command/COMMAND.md)
+            if path.is_dir() {
+                let command_file = path.join("COMMAND.md");
+                if !command_file.exists() {
+                    continue;
+                }
+
+                let slug = match path.file_name() {
+                    Some(name) => name.to_string_lossy().to_string(),
+                    None => continue,
+                };
+
+                if !seen_slugs.insert(slug.clone()) {
+                    continue;
+                }
+
+                let content = match fs::read_to_string(&command_file) {
+                    Ok(content) => content,
+                    Err(_) => continue,
+                };
+
+                let (name, description) = parse_skill_metadata(&content);
+                if name.is_empty() {
+                    continue;
+                }
+
+                let metadata = fs::symlink_metadata(&path);
+                let is_symlink = metadata
+                    .as_ref()
+                    .map(|metadata| metadata.file_type().is_symlink())
+                    .unwrap_or(false);
+
+                let symlink_target = if is_symlink {
+                    fs::read_link(&path)
+                        .ok()
+                        .map(|target| target.to_string_lossy().to_string())
+                } else {
+                    None
+                };
+
+                commands.push(ExternalSlashCommandDto {
+                    slug,
+                    name,
+                    description,
+                    app_id: app_id.to_string(),
+                    path: path.to_string_lossy().to_string(),
+                    is_symlink,
+                    symlink_target,
+                });
             }
+            // Case 2: direct .md file (e.g. ~/.claude/commands/my-command.md)
+            else if path.extension().and_then(|s| s.to_str()) == Some("md") {
+                let slug = match path.file_stem() {
+                    Some(stem) => stem.to_string_lossy().to_string(),
+                    None => continue,
+                };
 
-            let command_file = path.join("COMMAND.md");
-            if !command_file.exists() {
-                continue;
+                if !seen_slugs.insert(slug.clone()) {
+                    continue;
+                }
+
+                let content = match fs::read_to_string(&path) {
+                    Ok(content) => content,
+                    Err(_) => continue,
+                };
+
+                let (name, description) = parse_skill_metadata(&content);
+                if name.is_empty() {
+                    continue;
+                }
+
+                // .md files are never symlinks (the symlink would be the file itself)
+                let is_symlink = fs::symlink_metadata(&path)
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false);
+
+                let symlink_target = if is_symlink {
+                    fs::read_link(&path)
+                        .ok()
+                        .map(|target| target.to_string_lossy().to_string())
+                } else {
+                    None
+                };
+
+                commands.push(ExternalSlashCommandDto {
+                    slug,
+                    name,
+                    description,
+                    app_id: app_id.to_string(),
+                    path: path.to_string_lossy().to_string(),
+                    is_symlink,
+                    symlink_target,
+                });
             }
-
-            let slug = match path.file_name() {
-                Some(name) => name.to_string_lossy().to_string(),
-                None => continue,
-            };
-
-            if !seen_slugs.insert(slug.clone()) {
-                continue;
-            }
-
-            let content = match fs::read_to_string(&command_file) {
-                Ok(content) => content,
-                Err(_) => continue,
-            };
-
-            let (name, description) = parse_skill_metadata(&content);
-            if name.is_empty() {
-                continue;
-            }
-
-            let metadata = fs::symlink_metadata(&path);
-            let is_symlink = metadata
-                .as_ref()
-                .map(|metadata| metadata.file_type().is_symlink())
-                .unwrap_or(false);
-
-            let symlink_target = if is_symlink {
-                fs::read_link(&path)
-                    .ok()
-                    .map(|target| target.to_string_lossy().to_string())
-            } else {
-                None
-            };
-
-            commands.push(ExternalSlashCommandDto {
-                slug,
-                name,
-                description,
-                app_id: app_id.to_string(),
-                path: path.to_string_lossy().to_string(),
-                is_symlink,
-                symlink_target,
-            });
         }
     }
 

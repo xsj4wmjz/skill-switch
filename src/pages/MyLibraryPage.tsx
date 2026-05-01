@@ -270,6 +270,13 @@ function ExternalDetailPanel({
             onClick={() => void showInFinder(skill.path)}
             aria-label="在 Finder 中显示"
           />
+          <IconButton
+            icon={<Download size={16} />}
+            variant="default"
+            title="导入到 SkillSwitch 管理"
+            onClick={onImport}
+            aria-label="导入到 SkillSwitch 管理"
+          />
         </div>
 
         {/* Meta info */}
@@ -342,11 +349,6 @@ function ExternalDetailPanel({
             )}
           </div>
         </div>
-
-        {/* Import action */}
-        <button className={s.externalDetailImportBtn} onClick={onImport}>
-          <Download size={14} /> 导入到 SkillSwitch
-        </button>
       </div>
     </aside>
   );

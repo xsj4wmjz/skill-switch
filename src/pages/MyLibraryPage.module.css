@@ -1672,25 +1672,6 @@
 .externalDetailDesc p {
   margin: 0;
 }
-.externalDetailImportBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 10px;
-  border-radius: 10px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  border: none;
-  background: var(--primary);
-  color: white;
-  transition: opacity 0.12s;
-}
-.externalDetailImportBtn:hover {
-  opacity: 0.88;
-}
 
 .externalDetailContentSection {
   margin-top: 16px;
