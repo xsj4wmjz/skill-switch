@@ -191,7 +191,15 @@ function ExternalSkillCard({
         <div className={s.cardBody}>
           <div className={s.cardHeader}>
             <span className={s.cardName}>{skill.name}</span>
-            <span className={s.cardBadgeExternal}>
+            <span
+              className={s.cardBadgeExternal}
+              style={{ cursor: "pointer" }}
+              title="在 Finder 中显示"
+              onClick={(e) => {
+                e.stopPropagation();
+                void showInFinder(skill.path);
+              }}
+            >
               <ExternalLink size={10} /> 外部
             </span>
           </div>

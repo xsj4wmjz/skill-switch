@@ -33,6 +33,7 @@ import {
   slashCommandUninstallFromProject,
   slashCommandUninstallGlobal,
 } from "../services/slashCommand";
+import { showInFinder } from "../services/skill";
 import type {
   CreateSlashCommandInput,
   ExternalSlashCommand,
@@ -170,7 +171,15 @@ function ExternalCommandCard({
         <div className={s.cardBody}>
           <div className={s.cardHeader}>
             <span className={s.cardName}>{command.name}</span>
-            <span className={s.cardBadgeExternal}>
+            <span
+              className={s.cardBadgeExternal}
+              style={{ cursor: "pointer" }}
+              title="在 Finder 中显示"
+              onClick={(e) => {
+                e.stopPropagation();
+                void showInFinder(command.path);
+              }}
+            >
               <ExternalLink size={10} /> 外部
             </span>
           </div>
@@ -728,6 +737,13 @@ function ExternalCommandDetail({
               </span>
             </div>
           </div>
+          <IconButton
+            icon={<ExternalLink size={16} />}
+            variant="default"
+            title="在 Finder 中显示"
+            onClick={() => void showInFinder(command.path)}
+            aria-label="在 Finder 中显示"
+          />
           <button className={s.createBtn} onClick={onImport}>
             <Download size={14} /> 导入
           </button>
